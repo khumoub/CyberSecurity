@@ -1,0 +1,72 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --bg: #0a0b0d;
+  --bg-card: #111318;
+  --bg-sidebar: #0d0f14;
+  --bg-border: #1e2028;
+  --accent-cyan: #00d4ff;
+  --accent-green: #00ff88;
+  --severity-critical: #ff3b3b;
+  --severity-high: #ff6b35;
+  --severity-medium: #ffcc00;
+  --severity-low: #4fc3f7;
+  --severity-info: #8892a4;
+  --text-primary: #e8eaf0;
+  --text-muted: #8892a4;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  background-color: var(--bg);
+  color: var(--text-primary);
+  font-family: ui-sans-serif, system-ui, sans-serif;
+}
+
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: #0d0f14; }
+::-webkit-scrollbar-thumb { background: #2a2d3a; border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: #3a3d4a; }
+
+.severity-critical { color: var(--severity-critical); }
+.severity-high { color: var(--severity-high); }
+.severity-medium { color: var(--severity-medium); }
+.severity-low { color: var(--severity-low); }
+.severity-info { color: var(--severity-info); }
+
+.badge-critical { background: rgba(255,59,59,0.15); color: var(--severity-critical); border: 1px solid rgba(255,59,59,0.3); }
+.badge-high { background: rgba(255,107,53,0.15); color: var(--severity-high); border: 1px solid rgba(255,107,53,0.3); }
+.badge-medium { background: rgba(255,204,0,0.15); color: var(--severity-medium); border: 1px solid rgba(255,204,0,0.3); }
+.badge-low { background: rgba(79,195,247,0.15); color: var(--severity-low); border: 1px solid rgba(79,195,247,0.3); }
+.badge-info { background: rgba(136,146,164,0.15); color: var(--severity-info); border: 1px solid rgba(136,146,164,0.3); }
+
+.terminal-text { font-family: ui-monospace, SFMono-Regular, monospace; color: #00ff88; }
+
+.glass-card {
+  background: rgba(17,19,24,0.8);
+  backdrop-filter: blur(10px);
+  border: 1px solid var(--bg-border);
+  border-radius: 8px;
+}
+
+.cyber-btn {
+  background: var(--accent-cyan);
+  color: #000;
+  font-weight: 600;
+  border-radius: 6px;
+  padding: 8px 16px;
+  transition: all 0.15s;
+}
+.cyber-btn:hover { background: #00b8d9; }
+
+.cyber-btn-ghost {
+  border: 1px solid var(--bg-border);
+  color: var(--text-primary);
+  border-radius: 6px;
+  padding: 8px 16px;
+  transition: all 0.15s;
+}
+.cyber-btn-ghost:hover { border-color: var(--accent-cyan); color: var(--accent-cyan); }

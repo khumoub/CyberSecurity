@@ -1,0 +1,154 @@
+version: '3.9'
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Leruo Security Platform
+# One-command deployment: docker compose up -d
+# ─────────────────────────────────────────────────────────────────────────────
+
+services:
+
+  # ── PostgreSQL ──────────────────────────────────────────────────────────────
+  postgres:
+    image: postgres:16-alpine
+    container_name: leruo-sec-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: leruo_security
+      POSTGRES_USER: leruo_user
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-leruo_sec_pass}
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U leruo_user -d leruo_security"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ── Redis (broker + cache) ───────────────────────────────────────────────────
+  redis:
+    image: redis:7-alpine
+    container_name: leruo-sec-redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ── FastAPI Backend (API + scanner) ─────────────────────────────────────────
+  backend:
+    build:
+      context: backend
+      dockerfile: Dockerfile
+    container_name: leruo-sec-api
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql+asyncpg://leruo_user:${POSTGRES_PASSWORD:-leruo_sec_pass}@postgres:5432/leruo_security
+      DATABASE_URL_SYNC: postgresql://leruo_user:${POSTGRES_PASSWORD:-leruo_sec_pass}@postgres:5432/leruo_security
+      REDIS_URL: redis://redis:6379/0
+      SECRET_KEY: ${SECRET_KEY:-change-me-in-production}
+      CORS_ORIGINS: '["http://localhost:3000","${FRONTEND_URL:-http://localhost:3000}"]'
+      NVD_API_KEY: ${NVD_API_KEY:-}
+      CLAUDE_API_KEY: ${CLAUDE_API_KEY:-}
+      STRIPE_SECRET_KEY: ${STRIPE_SECRET_KEY:-}
+      STRIPE_WEBHOOK_SECRET: ${STRIPE_WEBHOOK_SECRET:-}
+      RESEND_API_KEY: ${RESEND_API_KEY:-}
+      EMAIL_FROM: ${EMAIL_FROM:-security@leruo.io}
+      SCAN_OUTPUT_DIR: /tmp/leruo-scans
+    ports:
+      - "8000:8000"
+    volumes:
+      - scan_outputs:/tmp/leruo-scans
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/api/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+
+  # ── Celery Worker (scan job processor) ──────────────────────────────────────
+  worker:
+    build:
+      context: backend
+      dockerfile: Dockerfile.worker
+    container_name: leruo-sec-worker
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql+asyncpg://leruo_user:${POSTGRES_PASSWORD:-leruo_sec_pass}@postgres:5432/leruo_security
+      DATABASE_URL_SYNC: postgresql://leruo_user:${POSTGRES_PASSWORD:-leruo_sec_pass}@postgres:5432/leruo_security
+      REDIS_URL: redis://redis:6379/0
+      SECRET_KEY: ${SECRET_KEY:-change-me-in-production}
+      NVD_API_KEY: ${NVD_API_KEY:-}
+      CLAUDE_API_KEY: ${CLAUDE_API_KEY:-}
+      RESEND_API_KEY: ${RESEND_API_KEY:-}
+      EMAIL_FROM: ${EMAIL_FROM:-security@leruo.io}
+      SCAN_OUTPUT_DIR: /tmp/leruo-scans
+    volumes:
+      - scan_outputs:/tmp/leruo-scans
+
+  # ── Celery Beat (scheduled tasks: SLA alerts, CISA KEV feed) ────────────────
+  beat:
+    build:
+      context: backend
+      dockerfile: Dockerfile.worker
+    container_name: leruo-sec-beat
+    restart: unless-stopped
+    command: ["celery", "-A", "worker.celery_app", "beat", "--loglevel=info"]
+    depends_on:
+      - redis
+    environment:
+      REDIS_URL: redis://redis:6379/0
+      DATABASE_URL_SYNC: postgresql://leruo_user:${POSTGRES_PASSWORD:-leruo_sec_pass}@postgres:5432/leruo_security
+      RESEND_API_KEY: ${RESEND_API_KEY:-}
+      EMAIL_FROM: ${EMAIL_FROM:-security@leruo.io}
+
+  # ── Flower (Celery task monitoring) ─────────────────────────────────────────
+  flower:
+    build:
+      context: backend
+      dockerfile: Dockerfile.worker
+    container_name: leruo-sec-flower
+    restart: unless-stopped
+    command: ["celery", "-A", "worker.celery_app", "flower", "--port=5555"]
+    depends_on:
+      - redis
+    ports:
+      - "5555:5555"
+    environment:
+      REDIS_URL: redis://redis:6379/0
+
+  # ── Next.js Frontend ─────────────────────────────────────────────────────────
+  frontend:
+    build:
+      context: frontend
+      dockerfile: Dockerfile
+    container_name: leruo-sec-web
+    restart: unless-stopped
+    depends_on:
+      backend:
+        condition: service_healthy
+    environment:
+      NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:8000}
+      NEXT_PUBLIC_WS_URL: ${NEXT_PUBLIC_WS_URL:-ws://localhost:8000}
+    ports:
+      - "3000:3000"
+
+volumes:
+  postgres_data:
+  redis_data:
+  scan_outputs:
