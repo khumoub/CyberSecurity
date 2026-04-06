@@ -2,66 +2,51 @@
 
 import { useState } from 'react';
 import { DashboardLayout } from '@/components/layout/DashboardLayout';
+import { useScheduledReports, useWebhooks, useGenerateReport } from '@/lib/hooks';
 
-interface ScheduledReport {
-  id: string;
-  name: string;
-  type: 'executive' | 'technical' | 'compliance';
-  frequency: 'daily' | 'weekly' | 'monthly';
-  recipients: string;
-  lastRun: string;
-  nextRun: string;
-  enabled: boolean;
-}
-
-interface Webhook {
-  id: string;
-  name: string;
-  url: string;
-  events: string[];
-  status: 'active' | 'error' | 'disabled';
-  lastDelivery: string;
-}
-
-const scheduledReports: ScheduledReport[] = [
-  { id: 'sr1', name: 'Weekly Executive Summary', type: 'executive', frequency: 'weekly', recipients: 'ciso@corp.com, cto@corp.com', lastRun: '2026-03-30', nextRun: '2026-04-06', enabled: true },
-  { id: 'sr2', name: 'Daily Findings Digest', type: 'technical', frequency: 'daily', recipients: 'soc-team@corp.com', lastRun: '2026-04-04', nextRun: '2026-04-05', enabled: true },
-  { id: 'sr3', name: 'Monthly Compliance Report', type: 'compliance', frequency: 'monthly', recipients: 'compliance@corp.com', lastRun: '2026-03-01', nextRun: '2026-05-01', enabled: true },
-  { id: 'sr4', name: 'Quarterly TPRM Summary', type: 'executive', frequency: 'monthly', recipients: 'board@corp.com', lastRun: '2026-01-01', nextRun: '2026-07-01', enabled: false },
-];
-
-const webhooks: Webhook[] = [
-  { id: 'wh1', name: 'Slack #security-alerts', url: 'https://hooks.slack.com/services/T00000000/B00000000/XXXXXXXX', events: ['critical_finding', 'scan_complete'], status: 'active', lastDelivery: '2026-04-05 13:42' },
-  { id: 'wh2', name: 'PagerDuty On-Call', url: 'https://events.pagerduty.com/integration/XXXXX/enqueue', events: ['critical_finding', 'high_finding'], status: 'active', lastDelivery: '2026-04-05 02:11' },
-  { id: 'wh3', name: 'Jira Ticketing', url: 'https://jira.corp.com/webhook/receive/abc123', events: ['new_finding', 'scan_complete'], status: 'error', lastDelivery: '2026-04-03 09:00' },
-  { id: 'wh4', name: 'SIEM Syslog Forwarder', url: 'http://siem.corp.com:9200/api/events', events: ['all'], status: 'active', lastDelivery: '2026-04-05 14:30' },
-];
-
-const reportTypeColors = {
+const reportTypeColors: Record<string, string> = {
   executive: 'text-[#00d4ff] bg-[rgba(0,212,255,0.1)] border-[rgba(0,212,255,0.3)]',
   technical: 'text-[#00ff88] bg-[rgba(0,255,136,0.1)] border-[rgba(0,255,136,0.3)]',
   compliance: 'text-[#ffcc00] bg-[rgba(255,204,0,0.1)] border-[rgba(255,204,0,0.3)]',
 };
 
-const webhookStatusColors = {
+const webhookStatusColors: Record<string, string> = {
   active: 'text-[#00ff88] bg-[rgba(0,255,136,0.1)] border-[rgba(0,255,136,0.3)]',
   error: 'text-[#ff3b3b] bg-[rgba(255,59,59,0.1)] border-[rgba(255,59,59,0.3)]',
   disabled: 'text-[#8892a4] bg-[rgba(136,146,164,0.1)] border-[rgba(136,146,164,0.3)]',
 };
 
+function SkeletonRow({ cols }: { cols: number }) {
+  return (
+    <tr>
+      {Array.from({ length: cols }).map((_, i) => (
+        <td key={i} className="px-4 py-3">
+          <div className="h-4 bg-[#1e2028] rounded animate-pulse w-3/4" />
+        </td>
+      ))}
+    </tr>
+  );
+}
+
 export default function ReportingPage() {
+  const scheduledQ = useScheduledReports();
+  const webhooksQ = useWebhooks();
+  const generateReport = useGenerateReport();
+
+  const schedules: any[] = scheduledQ.data?.reports ?? scheduledQ.data ?? [];
+  const webhooks: any[] = webhooksQ.data?.webhooks ?? webhooksQ.data ?? [];
+
   const [generating, setGenerating] = useState<string | null>(null);
-  const [schedules, setSchedules] = useState(scheduledReports);
 
-  const handleGenerate = (type: string) => {
+  const handleGenerate = async (type: 'executive' | 'technical') => {
     setGenerating(type);
-    setTimeout(() => setGenerating(null), 2500);
-  };
-
-  const toggleSchedule = (id: string) => {
-    setSchedules((prev) =>
-      prev.map((r) => (r.id === id ? { ...r, enabled: !r.enabled } : r))
-    );
+    try {
+      await generateReport.mutateAsync({ type, options: {} });
+    } catch (err) {
+      console.error('Report generation failed', err);
+    } finally {
+      setGenerating(null);
+    }
   };
 
   return (
@@ -91,22 +76,12 @@ export default function ReportingPage() {
               </div>
             </div>
             <div className="text-xs text-[#8892a4] mb-4 space-y-1">
-              <div className="flex items-center gap-2">
-                <span className="w-1 h-1 rounded-full bg-[#00d4ff]" />
-                <span>Organization risk score & trend</span>
-              </div>
-              <div className="flex items-center gap-2">
-                <span className="w-1 h-1 rounded-full bg-[#00d4ff]" />
-                <span>Critical & high finding summary</span>
-              </div>
-              <div className="flex items-center gap-2">
-                <span className="w-1 h-1 rounded-full bg-[#00d4ff]" />
-                <span>Remediation progress metrics</span>
-              </div>
-              <div className="flex items-center gap-2">
-                <span className="w-1 h-1 rounded-full bg-[#00d4ff]" />
-                <span>Top 5 recommended actions</span>
-              </div>
+              {['Organization risk score & trend', 'Critical & high finding summary', 'Remediation progress metrics', 'Top 5 recommended actions'].map((item) => (
+                <div key={item} className="flex items-center gap-2">
+                  <span className="w-1 h-1 rounded-full bg-[#00d4ff]" />
+                  <span>{item}</span>
+                </div>
+              ))}
             </div>
             <button
               onClick={() => handleGenerate('executive')}
@@ -148,22 +123,12 @@ export default function ReportingPage() {
               </div>
             </div>
             <div className="text-xs text-[#8892a4] mb-4 space-y-1">
-              <div className="flex items-center gap-2">
-                <span className="w-1 h-1 rounded-full bg-[#00ff88]" />
-                <span>All findings with CVE/CVSS data</span>
-              </div>
-              <div className="flex items-center gap-2">
-                <span className="w-1 h-1 rounded-full bg-[#00ff88]" />
-                <span>Asset inventory & exposure map</span>
-              </div>
-              <div className="flex items-center gap-2">
-                <span className="w-1 h-1 rounded-full bg-[#00ff88]" />
-                <span>Scan output appendices</span>
-              </div>
-              <div className="flex items-center gap-2">
-                <span className="w-1 h-1 rounded-full bg-[#00ff88]" />
-                <span>Step-by-step remediation guides</span>
-              </div>
+              {['All findings with CVE/CVSS data', 'Asset inventory & exposure map', 'Scan output appendices', 'Step-by-step remediation guides'].map((item) => (
+                <div key={item} className="flex items-center gap-2">
+                  <span className="w-1 h-1 rounded-full bg-[#00ff88]" />
+                  <span>{item}</span>
+                </div>
+              ))}
             </div>
             <button
               onClick={() => handleGenerate('technical')}
@@ -208,30 +173,36 @@ export default function ReportingPage() {
               </tr>
             </thead>
             <tbody>
-              {schedules.map((report) => (
-                <tr key={report.id} className="border-b border-[#1e2028] hover:bg-[#161b27] transition-colors">
-                  <td className="px-4 py-3 text-xs font-medium text-[#e8eaf0]">{report.name}</td>
-                  <td className="px-4 py-3">
-                    <span className={`text-[10px] font-semibold px-2 py-0.5 rounded border uppercase ${reportTypeColors[report.type]}`}>
-                      {report.type}
-                    </span>
-                  </td>
-                  <td className="px-4 py-3 text-xs text-[#8892a4] capitalize">{report.frequency}</td>
-                  <td className="px-4 py-3 text-xs text-[#8892a4] max-w-[200px] truncate">{report.recipients}</td>
-                  <td className="px-4 py-3 font-mono text-xs text-[#8892a4]">{report.lastRun}</td>
-                  <td className="px-4 py-3 font-mono text-xs text-[#4fc3f7]">{report.nextRun}</td>
-                  <td className="px-4 py-3">
-                    <button
-                      onClick={() => toggleSchedule(report.id)}
-                      className={`relative w-10 h-5 rounded-full transition-colors ${report.enabled ? 'bg-[#00d4ff]' : 'bg-[#1e2028]'}`}
-                    >
-                      <span
-                        className={`absolute top-0.5 w-4 h-4 bg-white rounded-full shadow transition-transform ${report.enabled ? 'left-5.5 translate-x-1' : 'left-0.5'}`}
-                      />
-                    </button>
-                  </td>
-                </tr>
-              ))}
+              {scheduledQ.isLoading
+                ? Array.from({ length: 4 }).map((_, i) => <SkeletonRow key={i} cols={7} />)
+                : schedules.length === 0
+                ? (
+                  <tr>
+                    <td colSpan={7} className="px-4 py-8 text-center text-[#8892a4]">
+                      No scheduled reports configured yet.
+                    </td>
+                  </tr>
+                )
+                : schedules.map((report: any) => (
+                  <tr key={report.id} className="border-b border-[#1e2028] hover:bg-[#161b27] transition-colors">
+                    <td className="px-4 py-3 text-xs font-medium text-[#e8eaf0]">{report.name}</td>
+                    <td className="px-4 py-3">
+                      <span className={`text-[10px] font-semibold px-2 py-0.5 rounded border uppercase ${reportTypeColors[report.report_type ?? report.type] ?? reportTypeColors.technical}`}>
+                        {report.report_type ?? report.type}
+                      </span>
+                    </td>
+                    <td className="px-4 py-3 text-xs text-[#8892a4] capitalize">{report.frequency}</td>
+                    <td className="px-4 py-3 text-xs text-[#8892a4] max-w-[200px] truncate">{report.recipients}</td>
+                    <td className="px-4 py-3 font-mono text-xs text-[#8892a4]">{report.last_run_at ? new Date(report.last_run_at).toLocaleDateString() : '—'}</td>
+                    <td className="px-4 py-3 font-mono text-xs text-[#4fc3f7]">{report.next_run_at ? new Date(report.next_run_at).toLocaleDateString() : '—'}</td>
+                    <td className="px-4 py-3">
+                      <span className={`text-xs font-semibold ${report.enabled ? 'text-[#00ff88]' : 'text-[#8892a4]'}`}>
+                        {report.enabled ? 'On' : 'Off'}
+                      </span>
+                    </td>
+                  </tr>
+                ))
+              }
             </tbody>
           </table>
         </div>
@@ -256,29 +227,45 @@ export default function ReportingPage() {
               </tr>
             </thead>
             <tbody>
-              {webhooks.map((wh) => (
-                <tr key={wh.id} className="border-b border-[#1e2028] hover:bg-[#161b27] transition-colors">
-                  <td className="px-4 py-3 text-xs font-medium text-[#e8eaf0]">{wh.name}</td>
-                  <td className="px-4 py-3 font-mono text-xs text-[#8892a4] max-w-[200px] truncate">{wh.url}</td>
-                  <td className="px-4 py-3">
-                    <div className="flex flex-wrap gap-1">
-                      {wh.events.map((ev) => (
-                        <span key={ev} className="text-[9px] px-1.5 py-0.5 rounded bg-[#1e2028] text-[#8892a4]">{ev}</span>
-                      ))}
-                    </div>
-                  </td>
-                  <td className="px-4 py-3">
-                    <span className={`text-[10px] font-semibold px-2 py-0.5 rounded border uppercase ${webhookStatusColors[wh.status]}`}>
-                      {wh.status}
-                    </span>
-                  </td>
-                  <td className="px-4 py-3 font-mono text-xs text-[#8892a4]">{wh.lastDelivery}</td>
-                  <td className="px-4 py-3 flex gap-2">
-                    <button className="text-xs text-[#00d4ff] hover:underline">Test</button>
-                    <button className="text-xs text-[#8892a4] hover:text-[#ff3b3b] transition-colors">Delete</button>
-                  </td>
-                </tr>
-              ))}
+              {webhooksQ.isLoading
+                ? Array.from({ length: 4 }).map((_, i) => <SkeletonRow key={i} cols={6} />)
+                : webhooks.length === 0
+                ? (
+                  <tr>
+                    <td colSpan={6} className="px-4 py-8 text-center text-[#8892a4]">
+                      No webhooks configured. Add one to get real-time notifications.
+                    </td>
+                  </tr>
+                )
+                : webhooks.map((wh: any) => {
+                  const events: string[] = wh.events ?? wh.event_types ?? [];
+                  return (
+                    <tr key={wh.id} className="border-b border-[#1e2028] hover:bg-[#161b27] transition-colors">
+                      <td className="px-4 py-3 text-xs font-medium text-[#e8eaf0]">{wh.name}</td>
+                      <td className="px-4 py-3 font-mono text-xs text-[#8892a4] max-w-[200px] truncate">{wh.url}</td>
+                      <td className="px-4 py-3">
+                        <div className="flex flex-wrap gap-1">
+                          {events.map((ev: string) => (
+                            <span key={ev} className="text-[9px] px-1.5 py-0.5 rounded bg-[#1e2028] text-[#8892a4]">{ev}</span>
+                          ))}
+                        </div>
+                      </td>
+                      <td className="px-4 py-3">
+                        <span className={`text-[10px] font-semibold px-2 py-0.5 rounded border uppercase ${webhookStatusColors[wh.status] ?? webhookStatusColors.disabled}`}>
+                          {wh.status}
+                        </span>
+                      </td>
+                      <td className="px-4 py-3 font-mono text-xs text-[#8892a4]">
+                        {wh.last_triggered_at ? new Date(wh.last_triggered_at).toLocaleString() : '—'}
+                      </td>
+                      <td className="px-4 py-3 flex gap-2">
+                        <button className="text-xs text-[#00d4ff] hover:underline">Test</button>
+                        <button className="text-xs text-[#8892a4] hover:text-[#ff3b3b] transition-colors">Delete</button>
+                      </td>
+                    </tr>
+                  );
+                })
+              }
             </tbody>
           </table>
         </div>

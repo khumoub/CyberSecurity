@@ -28,6 +28,15 @@ celery_app = Celery(
         "worker.tasks.lynis_task",
         "worker.tasks.lan_discovery_task",
         "worker.tasks.whois_task",
+        "worker.tasks.recon_ng_task",
+        "worker.tasks.pcap_task",
+        "worker.tasks.credentialed_scan_task",
+        "worker.tasks.exploit_verify_task",
+        "worker.tasks.ad_attacks_task",
+        "worker.tasks.remediation_verify_task",
+        "worker.tasks.container_scan_task",
+        "worker.tasks.cis_audit_task",
+        "worker.tasks.easm_task",
     ],
 )
 
@@ -44,11 +53,31 @@ celery_app.conf.update(
     beat_schedule={
         "check-sla-breaches": {
             "task": "worker.tasks.sla_task.check_sla_breaches",
-            "schedule": 3600.0,  # hourly
+            "schedule": 3600.0,      # hourly
+        },
+        "assign-sla-deadlines": {
+            "task": "worker.tasks.sla_task.assign_sla_deadlines",
+            "schedule": 86400.0,     # daily
+        },
+        "calculate-mttr": {
+            "task": "worker.tasks.sla_task.calculate_mttr",
+            "schedule": 604800.0,    # weekly
         },
         "fetch-cisa-kev": {
             "task": "worker.tasks.intel_task.fetch_cisa_kev",
-            "schedule": 86400.0,  # daily
+            "schedule": 86400.0,     # daily
+        },
+        "enrich-epss-scores": {
+            "task": "worker.tasks.intel_task.enrich_epss_scores",
+            "schedule": 86400.0,     # daily
+        },
+        "calculate-risk-scores": {
+            "task": "worker.tasks.intel_task.calculate_risk_scores",
+            "schedule": 86400.0,     # daily
+        },
+        "easm-scheduled": {
+            "task": "worker.tasks.easm_task.run_easm_scheduled",
+            "schedule": 86400.0,     # daily
         },
     },
 )

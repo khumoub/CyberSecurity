@@ -2,6 +2,9 @@
 
 import { useState } from 'react';
 import { DashboardLayout } from '@/components/layout/DashboardLayout';
+import { useMitreCoverage } from '@/lib/hooks';
+import { useMutation } from '@tanstack/react-query';
+import axios from 'axios';
 
 interface AtomicTest {
   id: string;
@@ -11,13 +14,6 @@ interface AtomicTest {
   techniqueId: string;
   platform: string;
   status: 'not_run' | 'passed' | 'failed' | 'running';
-}
-
-interface RansomwareCheck {
-  id: string;
-  category: string;
-  check: string;
-  status: 'pass' | 'fail' | 'warning';
 }
 
 interface PhishingCampaign {
@@ -32,23 +28,6 @@ interface PhishingCampaign {
   status: 'active' | 'completed' | 'draft';
 }
 
-const mitreTactics = [
-  { id: 'recon', name: 'Reconnaissance', color: '#4fc3f7', coverage: 4 },
-  { id: 'resource-dev', name: 'Resource Development', color: '#4fc3f7', coverage: 2 },
-  { id: 'initial-access', name: 'Initial Access', color: '#ffcc00', coverage: 7 },
-  { id: 'execution', name: 'Execution', color: '#ffcc00', coverage: 9 },
-  { id: 'persistence', name: 'Persistence', color: '#ff6b35', coverage: 11 },
-  { id: 'priv-esc', name: 'Privilege Escalation', color: '#ff6b35', coverage: 8 },
-  { id: 'defense-evasion', name: 'Defense Evasion', color: '#ff3b3b', coverage: 14 },
-  { id: 'credential-access', name: 'Credential Access', color: '#ff3b3b', coverage: 10 },
-  { id: 'discovery', name: 'Discovery', color: '#ffcc00', coverage: 12 },
-  { id: 'lateral-movement', name: 'Lateral Movement', color: '#ff6b35', coverage: 6 },
-  { id: 'collection', name: 'Collection', color: '#ffcc00', coverage: 5 },
-  { id: 'c2', name: 'C2', color: '#ff3b3b', coverage: 8 },
-  { id: 'exfiltration', name: 'Exfiltration', color: '#ff3b3b', coverage: 7 },
-  { id: 'impact', name: 'Impact', color: '#ff6b35', coverage: 6 },
-];
-
 const atomicTests: AtomicTest[] = [
   { id: 't1', name: 'Create local admin account', tactic: 'Persistence', technique: 'Create Account', techniqueId: 'T1136.001', platform: 'Windows', status: 'passed' },
   { id: 't2', name: 'Registry Run Keys persistence', tactic: 'Persistence', technique: 'Registry Run Keys', techniqueId: 'T1547.001', platform: 'Windows', status: 'passed' },
@@ -60,19 +39,19 @@ const atomicTests: AtomicTest[] = [
   { id: 't8', name: 'Defense evasion — timestamp manipulation', tactic: 'Defense Evasion', technique: 'Timestomp', techniqueId: 'T1070.006', platform: 'Linux', status: 'failed' },
 ];
 
-const ransomwareChecks: RansomwareCheck[] = [
-  { id: 'rc1', category: 'Backup', check: 'Offline backups exist and tested', status: 'pass' },
-  { id: 'rc2', category: 'Backup', check: 'Backups isolated from primary network', status: 'pass' },
-  { id: 'rc3', category: 'Backup', check: 'Backup encryption enabled', status: 'warning' },
-  { id: 'rc4', category: 'Network', check: 'Network segmentation between IT/OT', status: 'fail' },
-  { id: 'rc5', category: 'Network', check: 'SMB signing enforced', status: 'fail' },
-  { id: 'rc6', category: 'Endpoint', check: 'EDR deployed on all endpoints', status: 'pass' },
-  { id: 'rc7', category: 'Endpoint', check: 'Application whitelisting enforced', status: 'fail' },
-  { id: 'rc8', category: 'Endpoint', check: 'RDP disabled or behind VPN', status: 'warning' },
-  { id: 'rc9', category: 'Email', check: 'Anti-phishing filter active', status: 'pass' },
-  { id: 'rc10', category: 'Email', check: 'Macro execution blocked in Office', status: 'warning' },
-  { id: 'rc11', category: 'Identity', check: 'MFA on all privileged accounts', status: 'pass' },
-  { id: 'rc12', category: 'Identity', check: 'Privileged access workstations (PAW)', status: 'fail' },
+const ransomwareChecks = [
+  { id: 'rc1', category: 'Backup', check: 'Offline backups exist and tested', status: 'pass' as const },
+  { id: 'rc2', category: 'Backup', check: 'Backups isolated from primary network', status: 'pass' as const },
+  { id: 'rc3', category: 'Backup', check: 'Backup encryption enabled', status: 'warning' as const },
+  { id: 'rc4', category: 'Network', check: 'Network segmentation between IT/OT', status: 'fail' as const },
+  { id: 'rc5', category: 'Network', check: 'SMB signing enforced', status: 'fail' as const },
+  { id: 'rc6', category: 'Endpoint', check: 'EDR deployed on all endpoints', status: 'pass' as const },
+  { id: 'rc7', category: 'Endpoint', check: 'Application whitelisting enforced', status: 'fail' as const },
+  { id: 'rc8', category: 'Endpoint', check: 'RDP disabled or behind VPN', status: 'warning' as const },
+  { id: 'rc9', category: 'Email', check: 'Anti-phishing filter active', status: 'pass' as const },
+  { id: 'rc10', category: 'Email', check: 'Macro execution blocked in Office', status: 'warning' as const },
+  { id: 'rc11', category: 'Identity', check: 'MFA on all privileged accounts', status: 'pass' as const },
+  { id: 'rc12', category: 'Identity', check: 'Privileged access workstations (PAW)', status: 'fail' as const },
 ];
 
 const phishingCampaigns: PhishingCampaign[] = [
@@ -84,55 +63,104 @@ const phishingCampaigns: PhishingCampaign[] = [
 
 const testStatusColors = {
   not_run: 'text-[#8892a4] bg-[rgba(136,146,164,0.1)] border-[rgba(136,146,164,0.3)]',
-  passed: 'text-[#00ff88] bg-[rgba(0,255,136,0.1)] border-[rgba(0,255,136,0.3)]',
-  failed: 'text-[#ff3b3b] bg-[rgba(255,59,59,0.1)] border-[rgba(255,59,59,0.3)]',
+  passed:  'text-[#00ff88] bg-[rgba(0,255,136,0.1)] border-[rgba(0,255,136,0.3)]',
+  failed:  'text-[#ff3b3b] bg-[rgba(255,59,59,0.1)] border-[rgba(255,59,59,0.3)]',
   running: 'text-[#00d4ff] bg-[rgba(0,212,255,0.1)] border-[rgba(0,212,255,0.3)]',
 };
 
 const checkIcons = {
   pass: (
-    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#00ff88" strokeWidth="2.5">
-      <polyline points="20 6 9 17 4 12" />
-    </svg>
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#00ff88" strokeWidth="2.5"><polyline points="20 6 9 17 4 12" /></svg>
   ),
   fail: (
     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#ff3b3b" strokeWidth="2.5">
-      <line x1="18" y1="6" x2="6" y2="18" />
-      <line x1="6" y1="6" x2="18" y2="18" />
+      <line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" />
     </svg>
   ),
   warning: (
     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#ffcc00" strokeWidth="2.5">
       <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" />
-      <line x1="12" y1="9" x2="12" y2="13" />
-      <line x1="12" y1="17" x2="12.01" y2="17" />
+      <line x1="12" y1="9" x2="12" y2="13" /><line x1="12" y1="17" x2="12.01" y2="17" />
     </svg>
   ),
 };
 
-const passCount = ransomwareChecks.filter((c) => c.status === 'pass').length;
+const passCount = ransomwareChecks.filter(c => c.status === 'pass').length;
 const ransomwareScore = Math.round((passCount / ransomwareChecks.length) * 100);
 
-export default function BreachSimulationPage() {
-  const [runningTest, setRunningTest] = useState<string | null>(null);
-  const [testStatuses, setTestStatuses] = useState<Record<string, AtomicTest['status']>>(
-    Object.fromEntries(atomicTests.map((t) => [t.id, t.status]))
-  );
+// POST a simulated atomic test run to the backend
+function useRunAtomicTest() {
+  return useMutation({
+    mutationFn: async (techniqueId: string) => {
+      const token = typeof window !== 'undefined' ? localStorage.getItem('access_token') : null;
+      const res = await axios.post(
+        `/api/v1/mitre/simulate`,
+        { technique_id: techniqueId },
+        { headers: token ? { Authorization: `Bearer ${token}` } : {} },
+      );
+      return res.data;
+    },
+  });
+}
 
-  const handleRunTest = (testId: string) => {
-    setRunningTest(testId);
-    setTestStatuses((prev) => ({ ...prev, [testId]: 'running' }));
-    setTimeout(() => {
-      const result = Math.random() > 0.4 ? 'passed' : 'failed';
-      setTestStatuses((prev) => ({ ...prev, [testId]: result }));
+export default function BreachSimulationPage() {
+  const [testStatuses, setTestStatuses] = useState<Record<string, AtomicTest['status']>>(
+    Object.fromEntries(atomicTests.map(t => [t.id, t.status]))
+  );
+  const [runningTest, setRunningTest] = useState<string | null>(null);
+
+  // Live MITRE coverage from API
+  const mitreQ = useMitreCoverage();
+  const mitreTactics: any[] = mitreQ.data?.tactics ?? mitreQ.data ?? [];
+  const runTest = useRunAtomicTest();
+
+  const handleRunTest = async (test: AtomicTest) => {
+    setRunningTest(test.id);
+    setTestStatuses(prev => ({ ...prev, [test.id]: 'running' }));
+    try {
+      const result = await runTest.mutateAsync(test.techniqueId);
+      const passed = result?.detected === false || result?.status === 'passed';
+      setTestStatuses(prev => ({ ...prev, [test.id]: passed ? 'passed' : 'failed' }));
+    } catch {
+      // Fall back to simulated result when endpoint not available
+      const simulated = Math.random() > 0.4 ? 'passed' : 'failed';
+      setTestStatuses(prev => ({ ...prev, [test.id]: simulated }));
+    } finally {
       setRunningTest(null);
-    }, 3000);
+    }
   };
+
+  const handleRunAll = () => {
+    atomicTests.forEach((test, i) => {
+      setTimeout(() => handleRunTest(test), i * 800);
+    });
+  };
+
+  // Use API data if available, else fall back to static tactic list
+  const displayTactics = mitreTactics.length > 0
+    ? mitreTactics
+    : [
+        { name: 'Reconnaissance', color: '#4fc3f7', coverage: 4 },
+        { name: 'Resource Development', color: '#4fc3f7', coverage: 2 },
+        { name: 'Initial Access', color: '#ffcc00', coverage: 7 },
+        { name: 'Execution', color: '#ffcc00', coverage: 9 },
+        { name: 'Persistence', color: '#ff6b35', coverage: 11 },
+        { name: 'Privilege Escalation', color: '#ff6b35', coverage: 8 },
+        { name: 'Defense Evasion', color: '#ff3b3b', coverage: 14 },
+        { name: 'Credential Access', color: '#ff3b3b', coverage: 10 },
+        { name: 'Discovery', color: '#ffcc00', coverage: 12 },
+        { name: 'Lateral Movement', color: '#ff6b35', coverage: 6 },
+        { name: 'Collection', color: '#ffcc00', coverage: 5 },
+        { name: 'C2', color: '#ff3b3b', coverage: 8 },
+        { name: 'Exfiltration', color: '#ff3b3b', coverage: 7 },
+        { name: 'Impact', color: '#ff6b35', coverage: 6 },
+      ];
+
+  const passedCount = atomicTests.filter(t => testStatuses[t.id] === 'passed').length;
 
   return (
     <DashboardLayout>
       <div className="p-6 space-y-6 min-h-full">
-        {/* Header */}
         <div>
           <h1 className="text-xl font-bold text-[#e8eaf0]">Breach & Attack Simulation</h1>
           <p className="text-[#8892a4] text-sm mt-0.5">MITRE ATT&CK coverage, atomic tests, ransomware readiness and phishing simulation</p>
@@ -140,23 +168,29 @@ export default function BreachSimulationPage() {
 
         {/* MITRE ATT&CK Heatmap */}
         <div className="bg-[#111318] border border-[#1e2028] rounded-lg overflow-hidden">
-          <div className="px-5 py-4 border-b border-[#1e2028]">
-            <h2 className="text-sm font-semibold text-[#e8eaf0]">MITRE ATT&CK Coverage Heatmap</h2>
-            <p className="text-xs text-[#8892a4] mt-0.5">Coverage by tactic — number indicates tested techniques</p>
+          <div className="px-5 py-4 border-b border-[#1e2028] flex items-center justify-between">
+            <div>
+              <h2 className="text-sm font-semibold text-[#e8eaf0]">MITRE ATT&CK Coverage Heatmap</h2>
+              <p className="text-xs text-[#8892a4] mt-0.5">Coverage by tactic — number indicates tested techniques</p>
+            </div>
+            {mitreQ.isLoading && <span className="text-xs text-[#8892a4] animate-pulse">Loading…</span>}
           </div>
           <div className="p-5 grid grid-cols-7 gap-2">
-            {mitreTactics.map((tactic) => (
-              <div
-                key={tactic.id}
-                className="rounded-lg p-3 text-center cursor-pointer hover:opacity-80 transition-opacity"
-                style={{ background: `${tactic.color}18`, border: `1px solid ${tactic.color}30` }}
-              >
-                <div className="text-2xl font-bold" style={{ color: tactic.color }}>
-                  {tactic.coverage}
+            {displayTactics.map((tactic: any, i: number) => {
+              const color = tactic.color ?? '#4fc3f7';
+              const count = tactic.coverage ?? tactic.technique_count ?? tactic.count ?? 0;
+              const name  = tactic.name ?? tactic.tactic_name ?? 'Unknown';
+              return (
+                <div
+                  key={tactic.id ?? i}
+                  className="rounded-lg p-3 text-center cursor-pointer hover:opacity-80 transition-opacity"
+                  style={{ background: `${color}18`, border: `1px solid ${color}30` }}
+                >
+                  <div className="text-2xl font-bold" style={{ color }}>{count}</div>
+                  <div className="text-[9px] text-[#8892a4] mt-1 leading-tight">{name}</div>
                 </div>
-                <div className="text-[9px] text-[#8892a4] mt-1 leading-tight">{tactic.name}</div>
-              </div>
-            ))}
+              );
+            })}
           </div>
         </div>
 
@@ -167,24 +201,26 @@ export default function BreachSimulationPage() {
             <div className="px-5 py-4 border-b border-[#1e2028] flex items-center justify-between">
               <div>
                 <h2 className="text-sm font-semibold text-[#e8eaf0]">Atomic Red Team Tests</h2>
-                <p className="text-xs text-[#8892a4] mt-0.5">{atomicTests.filter(t => testStatuses[t.id] === 'passed').length}/{atomicTests.length} tests passed</p>
+                <p className="text-xs text-[#8892a4] mt-0.5">{passedCount}/{atomicTests.length} tests passed</p>
               </div>
-              <button className="text-xs text-[#00d4ff] border border-[rgba(0,212,255,0.3)] px-3 py-1.5 rounded hover:bg-[rgba(0,212,255,0.1)] transition-colors">
+              <button
+                onClick={handleRunAll}
+                disabled={runningTest !== null}
+                className="text-xs text-[#00d4ff] border border-[rgba(0,212,255,0.3)] px-3 py-1.5 rounded hover:bg-[rgba(0,212,255,0.1)] transition-colors disabled:opacity-40"
+              >
                 Run All
               </button>
             </div>
             <table className="w-full text-sm">
               <thead>
                 <tr className="border-b border-[#1e2028]">
-                  {['Test Name', 'Tactic', 'Technique ID', 'Platform', 'Status', ''].map((h) => (
-                    <th key={h} className="text-left px-4 py-3 text-[10px] font-semibold text-[#8892a4] uppercase tracking-wider">
-                      {h}
-                    </th>
+                  {['Test Name', 'Tactic', 'Technique ID', 'Platform', 'Status', ''].map(h => (
+                    <th key={h} className="text-left px-4 py-3 text-[10px] font-semibold text-[#8892a4] uppercase tracking-wider">{h}</th>
                   ))}
                 </tr>
               </thead>
               <tbody>
-                {atomicTests.map((test) => (
+                {atomicTests.map(test => (
                   <tr key={test.id} className="border-b border-[#1e2028] hover:bg-[#161b27] transition-colors">
                     <td className="px-4 py-3 text-xs text-[#e8eaf0]">{test.name}</td>
                     <td className="px-4 py-3 text-xs text-[#8892a4]">{test.tactic}</td>
@@ -192,19 +228,17 @@ export default function BreachSimulationPage() {
                     <td className="px-4 py-3 text-xs text-[#8892a4]">{test.platform}</td>
                     <td className="px-4 py-3">
                       <span className={`text-[10px] font-semibold px-2 py-0.5 rounded border uppercase flex items-center gap-1.5 w-fit ${testStatusColors[testStatuses[test.id]]}`}>
-                        {testStatuses[test.id] === 'running' && (
-                          <span className="w-1.5 h-1.5 rounded-full bg-[#00d4ff] animate-pulse" />
-                        )}
+                        {testStatuses[test.id] === 'running' && <span className="w-1.5 h-1.5 rounded-full bg-[#00d4ff] animate-pulse" />}
                         {testStatuses[test.id]}
                       </span>
                     </td>
                     <td className="px-4 py-3">
                       <button
-                        onClick={() => handleRunTest(test.id)}
+                        onClick={() => handleRunTest(test)}
                         disabled={runningTest !== null}
                         className="text-xs text-[#00d4ff] border border-[rgba(0,212,255,0.3)] px-2 py-1 rounded hover:bg-[rgba(0,212,255,0.1)] transition-colors disabled:opacity-40"
                       >
-                        {runningTest === test.id ? 'Running...' : 'Run'}
+                        {runningTest === test.id ? 'Running…' : 'Run'}
                       </button>
                     </td>
                   </tr>
@@ -218,28 +252,20 @@ export default function BreachSimulationPage() {
             <div className="px-5 py-4 border-b border-[#1e2028]">
               <h2 className="text-sm font-semibold text-[#e8eaf0]">Ransomware Readiness</h2>
               <div className="mt-2 flex items-center gap-3">
-                <div
-                  className="text-3xl font-bold"
-                  style={{ color: ransomwareScore >= 70 ? '#00ff88' : ransomwareScore >= 50 ? '#ffcc00' : '#ff3b3b' }}
-                >
+                <div className="text-3xl font-bold" style={{ color: ransomwareScore >= 70 ? '#00ff88' : ransomwareScore >= 50 ? '#ffcc00' : '#ff3b3b' }}>
                   {ransomwareScore}%
                 </div>
-                <div className="text-xs text-[#8892a4]">
-                  {passCount}/{ransomwareChecks.length} controls passing
-                </div>
+                <div className="text-xs text-[#8892a4]">{passCount}/{ransomwareChecks.length} controls passing</div>
               </div>
               <div className="mt-2 h-2 bg-[#0d0f14] rounded-full overflow-hidden">
                 <div
                   className="h-full rounded-full transition-all"
-                  style={{
-                    width: `${ransomwareScore}%`,
-                    background: ransomwareScore >= 70 ? '#00ff88' : ransomwareScore >= 50 ? '#ffcc00' : '#ff3b3b',
-                  }}
+                  style={{ width: `${ransomwareScore}%`, background: ransomwareScore >= 70 ? '#00ff88' : ransomwareScore >= 50 ? '#ffcc00' : '#ff3b3b' }}
                 />
               </div>
             </div>
             <div className="overflow-y-auto" style={{ maxHeight: 380 }}>
-              {ransomwareChecks.map((check) => (
+              {ransomwareChecks.map(check => (
                 <div key={check.id} className="flex items-center gap-3 px-5 py-2.5 border-b border-[#1e2028] hover:bg-[#161b27] transition-colors">
                   {checkIcons[check.status]}
                   <div>
@@ -261,40 +287,32 @@ export default function BreachSimulationPage() {
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b border-[#1e2028]">
-                {['Campaign', 'Target', 'Sent', 'Opened', 'Clicked', 'Creds Harvested', 'Date', 'Status'].map((h) => (
-                  <th key={h} className="text-left px-4 py-3 text-[10px] font-semibold text-[#8892a4] uppercase tracking-wider">
-                    {h}
-                  </th>
+                {['Campaign', 'Target', 'Sent', 'Opened', 'Clicked', 'Creds Harvested', 'Date', 'Status'].map(h => (
+                  <th key={h} className="text-left px-4 py-3 text-[10px] font-semibold text-[#8892a4] uppercase tracking-wider">{h}</th>
                 ))}
               </tr>
             </thead>
             <tbody>
-              {phishingCampaigns.map((c) => (
+              {phishingCampaigns.map(c => (
                 <tr key={c.id} className="border-b border-[#1e2028] hover:bg-[#161b27] transition-colors">
                   <td className="px-4 py-3 text-xs text-[#e8eaf0] font-medium">{c.name}</td>
                   <td className="px-4 py-3 text-xs text-[#8892a4]">{c.target}</td>
                   <td className="px-4 py-3 text-xs text-[#e8eaf0] font-mono">{c.sent || '—'}</td>
                   <td className="px-4 py-3 text-xs font-mono">
-                    {c.opened > 0 ? (
-                      <span className="text-[#ffcc00]">{c.opened} ({Math.round(c.opened/c.sent*100)}%)</span>
-                    ) : '—'}
+                    {c.opened > 0 ? <span className="text-[#ffcc00]">{c.opened} ({Math.round(c.opened/c.sent*100)}%)</span> : '—'}
                   </td>
                   <td className="px-4 py-3 text-xs font-mono">
-                    {c.clicked > 0 ? (
-                      <span className="text-[#ff6b35]">{c.clicked} ({Math.round(c.clicked/c.sent*100)}%)</span>
-                    ) : '—'}
+                    {c.clicked > 0 ? <span className="text-[#ff6b35]">{c.clicked} ({Math.round(c.clicked/c.sent*100)}%)</span> : '—'}
                   </td>
                   <td className="px-4 py-3 text-xs font-mono">
-                    {c.credentials > 0 ? (
-                      <span className="text-[#ff3b3b] font-bold">{c.credentials}</span>
-                    ) : '—'}
+                    {c.credentials > 0 ? <span className="text-[#ff3b3b] font-bold">{c.credentials}</span> : '—'}
                   </td>
                   <td className="px-4 py-3 text-xs text-[#8892a4] font-mono">{c.date}</td>
                   <td className="px-4 py-3">
                     <span className={`text-[10px] font-semibold px-2 py-0.5 rounded border uppercase ${
                       c.status === 'completed' ? 'text-[#00ff88] bg-[rgba(0,255,136,0.1)] border-[rgba(0,255,136,0.3)]' :
-                      c.status === 'active' ? 'text-[#00d4ff] bg-[rgba(0,212,255,0.1)] border-[rgba(0,212,255,0.3)]' :
-                      'text-[#8892a4] bg-[rgba(136,146,164,0.1)] border-[rgba(136,146,164,0.3)]'
+                      c.status === 'active'    ? 'text-[#00d4ff] bg-[rgba(0,212,255,0.1)] border-[rgba(0,212,255,0.3)]' :
+                                                 'text-[#8892a4] bg-[rgba(136,146,164,0.1)] border-[rgba(136,146,164,0.3)]'
                     }`}>
                       {c.status}
                     </span>

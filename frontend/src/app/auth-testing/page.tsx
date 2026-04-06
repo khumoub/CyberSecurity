@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import { DashboardLayout } from '@/components/layout/DashboardLayout';
 import { TerminalOutput } from '@/components/ui/TerminalOutput';
+import { useRunTool, useWordlists } from '@/lib/hooks';
 
 interface AuthTool {
   id: string;
@@ -67,7 +68,7 @@ const authTools: AuthTool[] = [
     id: 'wordlist',
     name: 'Wordlist Manager',
     binary: 'wordlist-mgr',
-    description: 'Manage, generate and combine wordlists. Includes SecLists, rockyou, Seclists and custom rule-based mutation with hashcat rules.',
+    description: 'View available wordlists on this server — SecLists, rockyou, dirb and custom lists with size and line count details.',
     tags: ['Wordlist', 'SecLists', 'rockyou'],
     accentColor: '#4fc3f7',
     requiredAuth: false,
@@ -98,23 +99,112 @@ const authTools: AuthTool[] = [
   },
 ];
 
+// Map tool IDs to API endpoint names
+const TOOL_ENDPOINT: Record<string, string> = {
+  hydra:          'hydra',
+  hashid:         'hashid',
+  hashcat:        'hashcat',
+  'default-creds': 'default-creds-check',
+};
+
 interface LaunchModalProps {
   tool: AuthTool;
   onClose: () => void;
+}
+
+function WordlistPanel({ onClose }: { onClose: () => void }) {
+  const { data, isLoading } = useWordlists();
+  const wordlists: any[] = data?.wordlists ?? [];
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
+      <div className="bg-[#111318] border border-[#1e2028] rounded-xl w-full max-w-2xl mx-4 shadow-2xl">
+        <div className="flex items-center justify-between px-6 py-4 border-b border-[#1e2028]">
+          <h3 className="text-base font-bold text-[#e8eaf0]">Wordlist Manager</h3>
+          <button onClick={onClose} className="text-[#8892a4] hover:text-[#e8eaf0]">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" />
+            </svg>
+          </button>
+        </div>
+        <div className="p-6">
+          {isLoading ? (
+            <div className="space-y-2">
+              {[1,2,3,4].map(i => <div key={i} className="h-10 bg-[#1e2028] rounded animate-pulse" />)}
+            </div>
+          ) : (
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b border-[#1e2028]">
+                  {['Name', 'Type', 'Lines', 'Size', 'Available'].map(h => (
+                    <th key={h} className="text-left px-3 py-2 text-[10px] font-semibold text-[#8892a4] uppercase tracking-wider">{h}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {wordlists.map((w: any) => (
+                  <tr key={w.path} className="border-b border-[#1e2028]">
+                    <td className="px-3 py-2 text-xs text-[#e8eaf0]">{w.name}</td>
+                    <td className="px-3 py-2 text-xs text-[#8892a4] capitalize">{w.type}</td>
+                    <td className="px-3 py-2 text-xs font-mono text-[#4fc3f7]">{w.line_count?.toLocaleString() ?? '—'}</td>
+                    <td className="px-3 py-2 text-xs text-[#8892a4]">
+                      {w.size_bytes ? `${(w.size_bytes / 1024 / 1024).toFixed(1)} MB` : '—'}
+                    </td>
+                    <td className="px-3 py-2">
+                      <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${w.exists ? 'text-[#00ff88] bg-[rgba(0,255,136,0.1)]' : 'text-[#ff3b3b] bg-[rgba(255,59,59,0.1)]'}`}>
+                        {w.exists ? 'Installed' : 'Missing'}
+                      </span>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </div>
+      </div>
+    </div>
+  );
 }
 
 function LaunchModal({ tool, onClose }: LaunchModalProps) {
   const [target, setTarget] = useState('');
   const [protocol, setProtocol] = useState('ssh');
   const [wordlist, setWordlist] = useState('/usr/share/wordlists/rockyou.txt');
+  const [vendor, setVendor] = useState('generic');
+  const [hashInput, setHashInput] = useState('');
   const [taskId, setTaskId] = useState<string | null>(null);
   const [accepted, setAccepted] = useState(false);
+  const [launching, setLaunching] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
+  const runTool = useRunTool();
   const protocols = ['ssh', 'ftp', 'rdp', 'smb', 'http', 'https', 'telnet', 'mysql', 'postgresql', 'vnc'];
 
-  const handleLaunch = () => {
-    if (!target.trim() || !accepted) return;
-    setTaskId(`task-${tool.id}-${Date.now()}`);
+  const handleLaunch = async () => {
+    if (tool.requiredAuth && !accepted) return;
+    setLaunching(true);
+    setError(null);
+
+    try {
+      const endpoint = TOOL_ENDPOINT[tool.id];
+      let body: any = {};
+
+      if (tool.id === 'hydra') {
+        body = { target, protocol, password_file: wordlist, authorized: true, threads: 4 };
+      } else if (tool.id === 'hashid') {
+        body = { target: hashInput || target };
+      } else if (tool.id === 'hashcat') {
+        body = { target: hashInput || target, wordlist, authorized: true };
+      } else if (tool.id === 'default-creds') {
+        body = { target, vendor, protocol };
+      }
+
+      const res = await runTool.mutateAsync({ tool: endpoint, body });
+      setTaskId(res.scan_id);
+    } catch (err: any) {
+      setError(err?.response?.data?.detail ?? err?.message ?? 'Launch failed');
+    } finally {
+      setLaunching(false);
+    }
   };
 
   return (
@@ -130,81 +220,106 @@ function LaunchModal({ tool, onClose }: LaunchModalProps) {
           </div>
           <button onClick={onClose} className="text-[#8892a4] hover:text-[#e8eaf0]">
             <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              <line x1="18" y1="6" x2="6" y2="18" />
-              <line x1="6" y1="6" x2="18" y2="18" />
+              <line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" />
             </svg>
           </button>
         </div>
+
         <div className="p-6 space-y-4">
           {!taskId ? (
             <>
-              <div className="bg-[rgba(255,59,59,0.08)] border border-[rgba(255,59,59,0.3)] rounded-lg px-4 py-3">
-                <div className="flex items-start gap-2">
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#ff3b3b" strokeWidth="2" className="mt-0.5 shrink-0">
-                    <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" />
-                    <line x1="12" y1="9" x2="12" y2="13" />
-                    <line x1="12" y1="17" x2="12.01" y2="17" />
-                  </svg>
-                  <div>
-                    <div className="text-xs font-bold text-[#ff3b3b] mb-1">Authorization Required</div>
-                    <div className="text-xs text-[#8892a4]">
-                      This tool performs credential testing. Unauthorized use against systems you do not own or have written permission to test is illegal and may result in criminal prosecution.
+              {tool.requiredAuth && (
+                <div className="bg-[rgba(255,59,59,0.08)] border border-[rgba(255,59,59,0.3)] rounded-lg px-4 py-3">
+                  <div className="flex items-start gap-2">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#ff3b3b" strokeWidth="2" className="mt-0.5 shrink-0">
+                      <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" />
+                      <line x1="12" y1="9" x2="12" y2="13" /><line x1="12" y1="17" x2="12.01" y2="17" />
+                    </svg>
+                    <div>
+                      <div className="text-xs font-bold text-[#ff3b3b] mb-1">Authorization Required</div>
+                      <div className="text-xs text-[#8892a4]">
+                        Unauthorized credential testing is illegal. Only use against systems you own or have written permission to test.
+                      </div>
                     </div>
                   </div>
-                </div>
-                <label className="flex items-center gap-2 mt-3 cursor-pointer">
-                  <input
-                    type="checkbox"
-                    checked={accepted}
-                    onChange={(e) => setAccepted(e.target.checked)}
-                    className="w-4 h-4 accent-[#ff3b3b]"
-                  />
-                  <span className="text-xs text-[#e8eaf0]">I confirm I have written authorization to test this target</span>
-                </label>
-              </div>
-              <div>
-                <label className="block text-xs font-medium text-[#8892a4] uppercase tracking-wider mb-1.5">Target</label>
-                <input
-                  type="text"
-                  value={target}
-                  onChange={(e) => setTarget(e.target.value)}
-                  placeholder="10.0.1.45 or ssh://target.corp.com"
-                  className="w-full bg-[#0d0f14] border border-[#1e2028] rounded-lg px-4 py-2.5 text-sm text-[#e8eaf0] placeholder-[#3a3d4a] focus:outline-none focus:border-[#00d4ff]"
-                />
-              </div>
-              {(tool.id === 'hydra' || tool.id === 'default-creds') && (
-                <div>
-                  <label className="block text-xs font-medium text-[#8892a4] uppercase tracking-wider mb-1.5">Protocol</label>
-                  <select
-                    value={protocol}
-                    onChange={(e) => setProtocol(e.target.value)}
-                    className="w-full bg-[#0d0f14] border border-[#1e2028] rounded-lg px-4 py-2.5 text-sm text-[#e8eaf0] focus:outline-none focus:border-[#00d4ff]"
-                  >
-                    {protocols.map((p) => (
-                      <option key={p} value={p}>{p.toUpperCase()}</option>
-                    ))}
-                  </select>
+                  <label className="flex items-center gap-2 mt-3 cursor-pointer">
+                    <input type="checkbox" checked={accepted} onChange={e => setAccepted(e.target.checked)} className="w-4 h-4 accent-[#ff3b3b]" />
+                    <span className="text-xs text-[#e8eaf0]">I confirm I have written authorization to test this target</span>
+                  </label>
                 </div>
               )}
-              {(tool.id === 'hydra' || tool.id === 'hashcat') && (
+
+              {/* Target field */}
+              {tool.id !== 'hashid' && tool.id !== 'hashcat' && (
                 <div>
-                  <label className="block text-xs font-medium text-[#8892a4] uppercase tracking-wider mb-1.5">Wordlist Path</label>
+                  <label className="block text-xs font-medium text-[#8892a4] uppercase tracking-wider mb-1.5">Target</label>
                   <input
-                    type="text"
-                    value={wordlist}
-                    onChange={(e) => setWordlist(e.target.value)}
+                    type="text" value={target} onChange={e => setTarget(e.target.value)}
+                    placeholder="10.0.1.45 or ssh://target.corp.com"
+                    className="w-full bg-[#0d0f14] border border-[#1e2028] rounded-lg px-4 py-2.5 text-sm text-[#e8eaf0] placeholder-[#3a3d4a] focus:outline-none focus:border-[#00d4ff]"
+                  />
+                </div>
+              )}
+
+              {/* Hash input for hashid/hashcat */}
+              {(tool.id === 'hashid' || tool.id === 'hashcat') && (
+                <div>
+                  <label className="block text-xs font-medium text-[#8892a4] uppercase tracking-wider mb-1.5">Hash Value</label>
+                  <input
+                    type="text" value={hashInput} onChange={e => setHashInput(e.target.value)}
+                    placeholder="e.g. 5f4dcc3b5aa765d61d8327deb882cf99"
                     className="w-full bg-[#0d0f14] border border-[#1e2028] rounded-lg px-4 py-2.5 text-sm font-mono text-[#e8eaf0] placeholder-[#3a3d4a] focus:outline-none focus:border-[#00d4ff]"
                   />
                 </div>
               )}
+
+              {/* Protocol */}
+              {(tool.id === 'hydra' || tool.id === 'default-creds') && (
+                <div>
+                  <label className="block text-xs font-medium text-[#8892a4] uppercase tracking-wider mb-1.5">Protocol</label>
+                  <select value={protocol} onChange={e => setProtocol(e.target.value)}
+                    className="w-full bg-[#0d0f14] border border-[#1e2028] rounded-lg px-4 py-2.5 text-sm text-[#e8eaf0] focus:outline-none focus:border-[#00d4ff]">
+                    {protocols.map(p => <option key={p} value={p}>{p.toUpperCase()}</option>)}
+                  </select>
+                </div>
+              )}
+
+              {/* Vendor for default-creds */}
+              {tool.id === 'default-creds' && (
+                <div>
+                  <label className="block text-xs font-medium text-[#8892a4] uppercase tracking-wider mb-1.5">Vendor</label>
+                  <select value={vendor} onChange={e => setVendor(e.target.value)}
+                    className="w-full bg-[#0d0f14] border border-[#1e2028] rounded-lg px-4 py-2.5 text-sm text-[#e8eaf0] focus:outline-none focus:border-[#00d4ff]">
+                    {['generic','cisco','linksys','dlink','asus','mikrotik','fortinet','palo-alto','juniper','vmware'].map(v =>
+                      <option key={v} value={v}>{v}</option>
+                    )}
+                  </select>
+                </div>
+              )}
+
+              {/* Wordlist */}
+              {(tool.id === 'hydra' || tool.id === 'hashcat') && (
+                <div>
+                  <label className="block text-xs font-medium text-[#8892a4] uppercase tracking-wider mb-1.5">Wordlist Path</label>
+                  <input type="text" value={wordlist} onChange={e => setWordlist(e.target.value)}
+                    className="w-full bg-[#0d0f14] border border-[#1e2028] rounded-lg px-4 py-2.5 text-sm font-mono text-[#e8eaf0] placeholder-[#3a3d4a] focus:outline-none focus:border-[#00d4ff]"
+                  />
+                </div>
+              )}
+
+              {error && (
+                <div className="text-xs text-[#ff3b3b] bg-[rgba(255,59,59,0.1)] border border-[rgba(255,59,59,0.3)] rounded px-3 py-2">{error}</div>
+              )}
+
               <div className="flex gap-3">
                 <button
                   onClick={handleLaunch}
-                  disabled={!accepted}
-                  className="cyber-btn text-sm disabled:opacity-40 disabled:cursor-not-allowed"
-                  style={{ background: accepted ? tool.accentColor : undefined }}
+                  disabled={launching || (tool.requiredAuth && !accepted)}
+                  className="cyber-btn text-sm disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-2"
+                  style={{ background: accepted || !tool.requiredAuth ? tool.accentColor : undefined }}
                 >
-                  Launch {tool.binary}
+                  {launching && <svg className="animate-spin" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M21 12a9 9 0 1 1-6.219-8.56"/></svg>}
+                  {launching ? 'Launching…' : `Launch ${tool.binary}`}
                 </button>
                 <button onClick={onClose} className="cyber-btn-ghost text-sm">Cancel</button>
               </div>
@@ -220,6 +335,7 @@ function LaunchModal({ tool, onClose }: LaunchModalProps) {
 
 export default function AuthTestingPage() {
   const [activeTool, setActiveTool] = useState<AuthTool | null>(null);
+  const [showWordlists, setShowWordlists] = useState(false);
 
   return (
     <DashboardLayout>
@@ -234,11 +350,9 @@ export default function AuthTestingPage() {
             </svg>
           </div>
           <div>
-            <div className="text-sm font-bold text-[#ff3b3b] uppercase tracking-wide">
-              AUTHORIZED TESTING ONLY — All activity logged
-            </div>
+            <div className="text-sm font-bold text-[#ff3b3b] uppercase tracking-wide">AUTHORIZED TESTING ONLY — All activity logged</div>
             <div className="text-xs text-[#8892a4] mt-0.5">
-              Unauthorized use of these tools is prohibited and may constitute a criminal offense under the Computer Fraud and Abuse Act (CFAA) and equivalent laws. All sessions are recorded and attributed to your account.
+              Unauthorized use is prohibited and may constitute a criminal offense under CFAA and equivalent laws. All sessions are recorded and attributed to your account.
             </div>
           </div>
         </div>
@@ -250,15 +364,9 @@ export default function AuthTestingPage() {
 
         <div className="grid grid-cols-3 gap-4">
           {authTools.map((tool) => (
-            <div
-              key={tool.id}
-              className="bg-[#111318] border border-[#1e2028] rounded-lg p-5 hover:border-[#2a2d3a] transition-all"
-            >
+            <div key={tool.id} className="bg-[#111318] border border-[#1e2028] rounded-lg p-5 hover:border-[#2a2d3a] transition-all">
               <div className="flex items-start justify-between mb-3">
-                <div
-                  className="w-11 h-11 rounded-lg flex items-center justify-center"
-                  style={{ background: `${tool.accentColor}15` }}
-                >
+                <div className="w-11 h-11 rounded-lg flex items-center justify-center" style={{ background: `${tool.accentColor}15` }}>
                   <span style={{ color: tool.accentColor }}>{tool.icon}</span>
                 </div>
                 {tool.requiredAuth && (
@@ -272,22 +380,16 @@ export default function AuthTestingPage() {
               <p className="text-xs text-[#8892a4] leading-relaxed mb-4">{tool.description}</p>
               <div className="flex items-center justify-between">
                 <div className="flex flex-wrap gap-1">
-                  {tool.tags.map((tag) => (
-                    <span key={tag} className="text-[10px] px-1.5 py-0.5 rounded bg-[#1e2028] text-[#8892a4]">
-                      {tag}
-                    </span>
+                  {tool.tags.map(tag => (
+                    <span key={tag} className="text-[10px] px-1.5 py-0.5 rounded bg-[#1e2028] text-[#8892a4]">{tag}</span>
                   ))}
                 </div>
                 <button
-                  onClick={() => setActiveTool(tool)}
+                  onClick={() => tool.id === 'wordlist' ? setShowWordlists(true) : setActiveTool(tool)}
                   className="text-sm font-semibold px-3 py-1.5 rounded-md transition-all border"
-                  style={{
-                    color: tool.accentColor,
-                    borderColor: `${tool.accentColor}40`,
-                    background: `${tool.accentColor}10`,
-                  }}
+                  style={{ color: tool.accentColor, borderColor: `${tool.accentColor}40`, background: `${tool.accentColor}10` }}
                 >
-                  Launch
+                  {tool.id === 'wordlist' ? 'View' : 'Launch'}
                 </button>
               </div>
             </div>
@@ -295,9 +397,8 @@ export default function AuthTestingPage() {
         </div>
       </div>
 
-      {activeTool && (
-        <LaunchModal tool={activeTool} onClose={() => setActiveTool(null)} />
-      )}
+      {activeTool && <LaunchModal tool={activeTool} onClose={() => setActiveTool(null)} />}
+      {showWordlists && <WordlistPanel onClose={() => setShowWordlists(false)} />}
     </DashboardLayout>
   );
 }
