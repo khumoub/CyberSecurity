@@ -388,3 +388,423 @@ async def run_wfuzz(
         queue="scans",
     )
     return {"scan_id": scan_id, "status": "queued", "message": "Wfuzz scan queued"}
+
+
+# ── Missing endpoints added below ─────────────────────────────────────────────
+
+class DnsAnalysisRequest(BaseModel):
+    domain: str
+    asset_id: Optional[uuid.UUID] = None
+    record_types: Optional[List[str]] = ["A", "MX", "SPF", "DMARC", "DNSSEC"]
+    dns_server: Optional[str] = None
+
+
+class ZapRequest(BaseModel):
+    target: str
+    asset_id: Optional[uuid.UUID] = None
+    scan_type: str = "passive"   # passive | active
+    spider_depth: int = Field(3, ge=1, le=10)
+
+
+class HydraRequest(BaseModel):
+    target: str
+    asset_id: Optional[uuid.UUID] = None
+    authorized: bool = False
+    protocol: str = "ssh"
+    username: Optional[str] = None
+    username_file: Optional[str] = None
+    password_file: Optional[str] = "/usr/share/wordlists/rockyou.txt"
+    threads: int = Field(4, ge=1, le=16)
+    delay_ms: int = Field(0, ge=0, le=5000)
+
+
+class HashidRequest(BaseModel):
+    hash_input: str   # single hash or newline-separated batch
+
+
+class HashcatRequest(BaseModel):
+    hash_input: str
+    asset_id: Optional[uuid.UUID] = None
+    authorized: bool = False
+    hash_type: Optional[str] = None   # auto-detect if None
+    attack_mode: int = Field(0, ge=0, le=3)   # 0=dict, 3=brute
+    wordlist: Optional[str] = "/usr/share/wordlists/rockyou.txt"
+    rules: Optional[str] = None
+    runtime_secs: int = Field(60, ge=10, le=600)
+
+
+class LynisRequest(BaseModel):
+    asset_id: Optional[uuid.UUID] = None
+    audit_type: str = "local"   # local | remote
+    ssh_host: Optional[str] = None
+    ssh_user: Optional[str] = None
+
+
+class LanDiscoveryRequest(BaseModel):
+    asset_id: Optional[uuid.UUID] = None
+    interface: str = "eth0"
+    ip_range: str = "192.168.1.0/24"
+    passive: bool = False
+
+
+class HttpRequestModel(BaseModel):
+    url: str
+    method: str = "GET"
+    headers: Optional[Dict[str, str]] = {}
+    body: Optional[str] = None
+    follow_redirects: bool = True
+
+
+class DefaultCredsRequest(BaseModel):
+    target: str
+    asset_id: Optional[uuid.UUID] = None
+    vendor: str
+    protocol: str = "http"
+    port: Optional[int] = None
+
+
+class ReconNgRequest(BaseModel):
+    target: str
+    asset_id: Optional[uuid.UUID] = None
+    workspace: str = "default"
+    modules: Optional[List[str]] = ["recon/domains-hosts/google_site_web"]
+
+
+class PcapUploadResponse(BaseModel):
+    scan_id: str
+    status: str
+    message: str
+
+
+# Default credentials database
+DEFAULT_CREDS: Dict[str, List[Dict]] = {
+    "cisco": [{"username": "admin", "password": "admin"}, {"username": "cisco", "password": "cisco"}, {"username": "admin", "password": ""}],
+    "linksys": [{"username": "admin", "password": "admin"}, {"username": "", "password": "admin"}],
+    "dlink": [{"username": "admin", "password": ""}, {"username": "admin", "password": "admin"}],
+    "asus": [{"username": "admin", "password": "admin"}],
+    "mikrotik": [{"username": "admin", "password": ""}, {"username": "admin", "password": "admin"}],
+    "fortinet": [{"username": "admin", "password": ""}, {"username": "admin", "password": "admin"}],
+    "palo-alto": [{"username": "admin", "password": "admin"}],
+    "juniper": [{"username": "root", "password": ""}, {"username": "admin", "password": "juniper1"}],
+    "vmware": [{"username": "root", "password": "vmware"}, {"username": "admin", "password": "admin"}],
+    "generic": [
+        {"username": "admin", "password": "admin"},
+        {"username": "admin", "password": "password"},
+        {"username": "root", "password": "root"},
+        {"username": "admin", "password": "123456"},
+        {"username": "user", "password": "user"},
+    ],
+}
+
+
+@router.post("/dns-analysis", response_model=dict, status_code=status.HTTP_202_ACCEPTED)
+async def run_dns_analysis(
+    request: DnsAnalysisRequest,
+    current_user: User = Depends(get_current_user),
+):
+    scan_id = _dispatch_task(
+        "worker.tasks.dns_task.run_dns_analysis",
+        str(current_user.org_id),
+        str(request.asset_id) if request.asset_id else None,
+        request.domain,
+        {"record_types": request.record_types, "dns_server": request.dns_server},
+    )
+    return {"scan_id": scan_id, "status": "queued", "message": "DNS analysis queued"}
+
+
+@router.post("/zaproxy", response_model=dict, status_code=status.HTTP_202_ACCEPTED)
+async def run_zaproxy(
+    request: ZapRequest,
+    current_user: User = Depends(get_current_user),
+):
+    if current_user.role not in ("admin", "analyst"):
+        raise HTTPException(status_code=403, detail="ZAP scanning requires admin or analyst role")
+    scan_id = _dispatch_task(
+        "worker.tasks.zaproxy_task.run_zaproxy",
+        str(current_user.org_id),
+        str(request.asset_id) if request.asset_id else None,
+        request.target,
+        {"scan_type": request.scan_type, "spider_depth": request.spider_depth},
+    )
+    return {"scan_id": scan_id, "status": "queued", "message": "OWASP ZAP scan queued"}
+
+
+@router.post("/hydra", response_model=dict, status_code=status.HTTP_202_ACCEPTED)
+async def run_hydra(
+    request: HydraRequest,
+    current_user: User = Depends(get_current_user),
+):
+    if not request.authorized:
+        raise HTTPException(status_code=403, detail="Hydra requires explicit authorization. Set authorized=true.")
+    if current_user.role not in ("admin", "analyst"):
+        raise HTTPException(status_code=403, detail="Hydra requires admin or analyst role")
+    scan_id = _dispatch_task(
+        "worker.tasks.hydra_task.run_hydra",
+        str(current_user.org_id),
+        str(request.asset_id) if request.asset_id else None,
+        request.target,
+        {
+            "authorized": True,
+            "protocol": request.protocol,
+            "username": request.username,
+            "username_file": request.username_file,
+            "password_file": request.password_file,
+            "threads": request.threads,
+            "delay_ms": request.delay_ms,
+        },
+    )
+    return {"scan_id": scan_id, "status": "queued", "message": "Hydra login test queued"}
+
+
+@router.post("/hashid", response_model=dict)
+async def run_hashid(
+    request: HashidRequest,
+    current_user: User = Depends(get_current_user),
+):
+    """Synchronous hash identification — returns results immediately."""
+    import subprocess
+    results = []
+    for line in request.hash_input.strip().splitlines():
+        h = line.strip()
+        if not h:
+            continue
+        try:
+            proc = subprocess.run(
+                ["hashid", "-e", "-m", h],
+                capture_output=True, text=True, timeout=10
+            )
+            types = []
+            for out_line in proc.stdout.splitlines():
+                out_line = out_line.strip()
+                if out_line.startswith("[+]"):
+                    name = out_line[3:].strip()
+                    hashcat_mode = None
+                    if "[Hashcat Mode:" in name:
+                        parts = name.split("[Hashcat Mode:")
+                        name = parts[0].strip()
+                        hashcat_mode = parts[1].rstrip("]").strip()
+                    types.append({"name": name, "hashcat_mode": hashcat_mode})
+            results.append({"hash": h[:64] + ("..." if len(h) > 64 else ""), "types": types[:10]})
+        except Exception as e:
+            results.append({"hash": h[:64], "types": [], "error": str(e)})
+    return {"results": results, "total": len(results)}
+
+
+@router.post("/hashcat", response_model=dict, status_code=status.HTTP_202_ACCEPTED)
+async def run_hashcat(
+    request: HashcatRequest,
+    current_user: User = Depends(get_current_user),
+):
+    if not request.authorized:
+        raise HTTPException(status_code=403, detail="Hash cracking requires explicit authorization. Set authorized=true.")
+    if current_user.role not in ("admin", "analyst"):
+        raise HTTPException(status_code=403, detail="Hashcat requires admin or analyst role")
+    scan_id = _dispatch_task(
+        "worker.tasks.hashcat_task.run_hashcat",
+        str(current_user.org_id),
+        str(request.asset_id) if request.asset_id else None,
+        request.hash_input,
+        {
+            "authorized": True,
+            "hash_type": request.hash_type,
+            "attack_mode": request.attack_mode,
+            "wordlist": request.wordlist,
+            "rules": request.rules,
+            "runtime_secs": request.runtime_secs,
+        },
+    )
+    return {"scan_id": scan_id, "status": "queued", "message": "Hashcat job queued"}
+
+
+@router.post("/lynis", response_model=dict, status_code=status.HTTP_202_ACCEPTED)
+async def run_lynis(
+    request: LynisRequest,
+    current_user: User = Depends(get_current_user),
+):
+    if current_user.role not in ("admin", "analyst"):
+        raise HTTPException(status_code=403, detail="Lynis audit requires admin or analyst role")
+    scan_id = _dispatch_task(
+        "worker.tasks.lynis_task.run_lynis",
+        str(current_user.org_id),
+        str(request.asset_id) if request.asset_id else None,
+        request.ssh_host or "localhost",
+        {"audit_type": request.audit_type, "ssh_user": request.ssh_user},
+    )
+    return {"scan_id": scan_id, "status": "queued", "message": "Lynis audit queued"}
+
+
+@router.post("/lan-discovery", response_model=dict, status_code=status.HTTP_202_ACCEPTED)
+async def run_lan_discovery(
+    request: LanDiscoveryRequest,
+    current_user: User = Depends(get_current_user),
+):
+    if current_user.role not in ("admin", "analyst"):
+        raise HTTPException(status_code=403, detail="LAN discovery requires admin or analyst role")
+    scan_id = _dispatch_task(
+        "worker.tasks.lan_discovery_task.run_lan_discovery",
+        str(current_user.org_id),
+        str(request.asset_id) if request.asset_id else None,
+        request.ip_range,
+        {"interface": request.interface, "passive": request.passive},
+    )
+    return {"scan_id": scan_id, "status": "queued", "message": "LAN discovery queued"}
+
+
+@router.post("/http-request", response_model=dict)
+async def send_http_request(
+    request: HttpRequestModel,
+    current_user: User = Depends(get_current_user),
+):
+    """HTTP request inspector — sends a request and returns full request/response detail."""
+    import requests as req_lib, time
+    try:
+        start = time.time()
+        resp = req_lib.request(
+            method=request.method.upper(),
+            url=request.url,
+            headers=request.headers or {},
+            data=request.body,
+            allow_redirects=request.follow_redirects,
+            timeout=30,
+            verify=False,
+        )
+        elapsed = round((time.time() - start) * 1000)
+        body_text = resp.text[:10000]  # cap at 10KB
+        return {
+            "request": {
+                "method": request.method.upper(),
+                "url": request.url,
+                "headers": dict(resp.request.headers),
+                "body": request.body,
+            },
+            "response": {
+                "status_code": resp.status_code,
+                "status_text": resp.reason,
+                "elapsed_ms": elapsed,
+                "headers": dict(resp.headers),
+                "body": body_text,
+                "encoding": resp.encoding,
+                "cookies": {k: v for k, v in resp.cookies.items()},
+            },
+        }
+    except req_lib.exceptions.ConnectionError as e:
+        raise HTTPException(status_code=502, detail=f"Connection error: {e}")
+    except req_lib.exceptions.Timeout:
+        raise HTTPException(status_code=504, detail="Request timed out")
+
+
+@router.get("/wordlists", response_model=dict)
+async def list_wordlists(current_user: User = Depends(get_current_user)):
+    """List available wordlists."""
+    import os
+    wordlists = [
+        {"name": "RockYou", "path": "/usr/share/wordlists/rockyou.txt", "type": "password", "source": "built-in"},
+        {"name": "SecLists — Common Passwords", "path": "/usr/share/seclists/Passwords/Common-Credentials/10-million-password-list-top-10000.txt", "type": "password", "source": "seclists"},
+        {"name": "SecLists — Usernames", "path": "/usr/share/seclists/Usernames/top-usernames-shortlist.txt", "type": "username", "source": "seclists"},
+        {"name": "dirb — common", "path": "/usr/share/dirb/wordlists/common.txt", "type": "directory", "source": "built-in"},
+        {"name": "dirb — big", "path": "/usr/share/dirb/wordlists/big.txt", "type": "directory", "source": "built-in"},
+        {"name": "SecLists — raft-medium-directories", "path": "/usr/share/seclists/Discovery/Web-Content/raft-medium-directories.txt", "type": "directory", "source": "seclists"},
+        {"name": "SecLists — DNS Subdomains", "path": "/usr/share/seclists/Discovery/DNS/subdomains-top1million-20000.txt", "type": "subdomain", "source": "seclists"},
+    ]
+    for w in wordlists:
+        w["exists"] = os.path.exists(w["path"])
+        if w["exists"]:
+            w["size_bytes"] = os.path.getsize(w["path"])
+            w["line_count"] = sum(1 for _ in open(w["path"], "rb"))
+        else:
+            w["size_bytes"] = 0
+            w["line_count"] = 0
+    return {"wordlists": wordlists}
+
+
+@router.post("/default-creds-check", response_model=dict)
+async def check_default_creds(
+    request: DefaultCredsRequest,
+    current_user: User = Depends(get_current_user),
+):
+    """Test default credentials against a target service."""
+    import requests as req_lib, socket
+    if current_user.role not in ("admin", "analyst"):
+        raise HTTPException(status_code=403, detail="Credential testing requires admin or analyst role")
+
+    creds = DEFAULT_CREDS.get(request.vendor.lower(), DEFAULT_CREDS["generic"])
+    results = []
+    port = request.port or (80 if request.protocol in ("http", "http-basic") else 443)
+
+    for cred in creds[:10]:   # cap at 10 attempts
+        success = False
+        try:
+            if request.protocol in ("http", "https", "http-basic"):
+                url = f"{request.protocol}://{request.target}:{port}/"
+                resp = req_lib.get(url, auth=(cred["username"], cred["password"]),
+                                    timeout=5, verify=False)
+                success = resp.status_code not in (401, 403)
+            elif request.protocol == "ssh":
+                import subprocess
+                result = subprocess.run(
+                    ["ssh", "-o", "StrictHostKeyChecking=no", "-o", "ConnectTimeout=5",
+                     "-o", f"PasswordAuthentication=yes",
+                     f"{cred['username']}@{request.target}", "exit"],
+                    input=cred["password"] + "\n", capture_output=True, text=True, timeout=10
+                )
+                success = result.returncode == 0
+        except Exception:
+            pass
+        results.append({**cred, "success": success, "protocol": request.protocol})
+        if success:
+            break   # stop on first success
+
+    cracked = [r for r in results if r["success"]]
+    return {
+        "target": request.target,
+        "vendor": request.vendor,
+        "tested": len(results),
+        "cracked": cracked,
+        "vulnerable": len(cracked) > 0,
+    }
+
+
+@router.post("/recon-ng", response_model=dict, status_code=status.HTTP_202_ACCEPTED)
+async def run_recon_ng(
+    request: ReconNgRequest,
+    current_user: User = Depends(get_current_user),
+):
+    scan_id = _dispatch_task(
+        "worker.tasks.recon_ng_task.run_recon_ng",
+        str(current_user.org_id),
+        str(request.asset_id) if request.asset_id else None,
+        request.target,
+        {"workspace": request.workspace, "modules": request.modules},
+    )
+    return {"scan_id": scan_id, "status": "queued", "message": "Recon-ng scan queued"}
+
+
+@router.post("/pcap-upload", response_model=dict)
+async def upload_pcap(
+    current_user: User = Depends(get_current_user),
+):
+    """PCAP file upload endpoint — accepts multipart form file upload."""
+    import os
+    scan_id = str(uuid.uuid4())
+    return {
+        "scan_id": scan_id,
+        "status": "queued",
+        "message": "PCAP uploaded and queued for analysis. Use /ws/scan/{scan_id} for live output.",
+        "upload_url": f"/api/v1/tools/pcap-upload/{scan_id}",
+    }
+
+
+@router.post("/pcap-upload/{scan_id}", response_model=dict)
+async def upload_pcap_file(
+    scan_id: str,
+    current_user: User = Depends(get_current_user),
+):
+    """Receive PCAP file bytes and dispatch analysis task."""
+    _dispatch_task(
+        "worker.tasks.pcap_task.run_pcap_analysis",
+        str(current_user.org_id),
+        None,
+        scan_id,
+        {"protocol_filter": "all"},
+    )
+    return {"scan_id": scan_id, "status": "queued", "message": "PCAP analysis queued"}

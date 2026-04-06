@@ -2,74 +2,9 @@
 
 import { useState } from 'react';
 import { DashboardLayout } from '@/components/layout/DashboardLayout';
+import { useVendors, useCreateVendor, useGenerateQuestionnaire } from '@/lib/hooks';
 
 type RiskTier = 'critical' | 'high' | 'medium' | 'low';
-type VendorStatus = 'assessed' | 'pending' | 'overdue' | 'never';
-
-interface Vendor {
-  id: string;
-  name: string;
-  domain: string;
-  tier: RiskTier;
-  techRiskScore: number;
-  dataAccess: string;
-  lastAssessed: string;
-  status: VendorStatus;
-  findings: { critical: number; high: number; medium: number };
-}
-
-const vendors: Vendor[] = [
-  {
-    id: 'v1', name: 'Salesforce', domain: 'salesforce.com', tier: 'critical',
-    techRiskScore: 3.2, dataAccess: 'CRM, PII', lastAssessed: '2026-03-01', status: 'assessed',
-    findings: { critical: 0, high: 1, medium: 4 },
-  },
-  {
-    id: 'v2', name: 'AWS', domain: 'aws.amazon.com', tier: 'critical',
-    techRiskScore: 2.8, dataAccess: 'Cloud Infrastructure', lastAssessed: '2026-02-15', status: 'assessed',
-    findings: { critical: 0, high: 0, medium: 2 },
-  },
-  {
-    id: 'v3', name: 'Okta', domain: 'okta.com', tier: 'critical',
-    techRiskScore: 4.1, dataAccess: 'Identity & Access', lastAssessed: '2026-01-20', status: 'overdue',
-    findings: { critical: 1, high: 2, medium: 3 },
-  },
-  {
-    id: 'v4', name: 'Slack', domain: 'slack.com', tier: 'high',
-    techRiskScore: 3.7, dataAccess: 'Internal Comms', lastAssessed: '2026-02-28', status: 'assessed',
-    findings: { critical: 0, high: 1, medium: 5 },
-  },
-  {
-    id: 'v5', name: 'GitHub', domain: 'github.com', tier: 'high',
-    techRiskScore: 3.5, dataAccess: 'Source Code', lastAssessed: '2026-03-10', status: 'assessed',
-    findings: { critical: 0, high: 2, medium: 6 },
-  },
-  {
-    id: 'v6', name: 'Zendesk', domain: 'zendesk.com', tier: 'high',
-    techRiskScore: 4.8, dataAccess: 'Customer Data', lastAssessed: '2025-11-15', status: 'overdue',
-    findings: { critical: 0, high: 3, medium: 8 },
-  },
-  {
-    id: 'v7', name: 'Stripe', domain: 'stripe.com', tier: 'critical',
-    techRiskScore: 2.1, dataAccess: 'Payment Processing', lastAssessed: '2026-03-22', status: 'assessed',
-    findings: { critical: 0, high: 0, medium: 1 },
-  },
-  {
-    id: 'v8', name: 'DocuSign', domain: 'docusign.com', tier: 'medium',
-    techRiskScore: 3.3, dataAccess: 'Contract Documents', lastAssessed: '2025-09-05', status: 'overdue',
-    findings: { critical: 0, high: 1, medium: 3 },
-  },
-  {
-    id: 'v9', name: 'Zoom', domain: 'zoom.us', tier: 'medium',
-    techRiskScore: 4.4, dataAccess: 'Internal Video', lastAssessed: '—', status: 'never',
-    findings: { critical: 0, high: 0, medium: 0 },
-  },
-  {
-    id: 'v10', name: 'Datadog', domain: 'datadoghq.com', tier: 'high',
-    techRiskScore: 3.9, dataAccess: 'Logs, Metrics', lastAssessed: '2026-01-08', status: 'pending',
-    findings: { critical: 0, high: 2, medium: 4 },
-  },
-];
 
 const tierColors: Record<RiskTier, { badge: string; bar: string }> = {
   critical: { badge: 'text-[#ff3b3b] bg-[rgba(255,59,59,0.1)] border-[rgba(255,59,59,0.3)]', bar: '#ff3b3b' },
@@ -78,31 +13,172 @@ const tierColors: Record<RiskTier, { badge: string; bar: string }> = {
   low: { badge: 'text-[#4fc3f7] bg-[rgba(79,195,247,0.1)] border-[rgba(79,195,247,0.3)]', bar: '#4fc3f7' },
 };
 
-const statusColors: Record<VendorStatus, string> = {
+const assessmentColors: Record<string, string> = {
   assessed: 'text-[#00ff88] bg-[rgba(0,255,136,0.1)] border-[rgba(0,255,136,0.3)]',
   pending: 'text-[#ffcc00] bg-[rgba(255,204,0,0.1)] border-[rgba(255,204,0,0.3)]',
   overdue: 'text-[#ff3b3b] bg-[rgba(255,59,59,0.1)] border-[rgba(255,59,59,0.3)]',
   never: 'text-[#8892a4] bg-[rgba(136,146,164,0.1)] border-[rgba(136,146,164,0.3)]',
 };
 
+function SkeletonRow({ cols }: { cols: number }) {
+  return (
+    <tr>
+      {Array.from({ length: cols }).map((_, i) => (
+        <td key={i} className="px-4 py-3">
+          <div className="h-4 bg-[#1e2028] rounded animate-pulse w-3/4" />
+        </td>
+      ))}
+    </tr>
+  );
+}
+
+interface AddVendorModalProps {
+  onClose: () => void;
+  onSave: (data: { name: string; domain: string; contact_email: string; risk_tier: string }) => void;
+}
+
+function AddVendorModal({ onClose, onSave }: AddVendorModalProps) {
+  const [form, setForm] = useState({ name: '', domain: '', contact_email: '', risk_tier: 'medium' });
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70">
+      <div className="bg-[#111318] border border-[#1e2028] rounded-xl p-6 w-full max-w-md">
+        <h2 className="text-lg font-bold text-[#e8eaf0] mb-4">Add Vendor</h2>
+        <div className="space-y-3">
+          {[
+            { label: 'Vendor Name', key: 'name', placeholder: 'e.g. Salesforce' },
+            { label: 'Domain', key: 'domain', placeholder: 'e.g. salesforce.com' },
+            { label: 'Contact Email', key: 'contact_email', placeholder: 'security@vendor.com' },
+          ].map(({ label, key, placeholder }) => (
+            <div key={key}>
+              <label className="block text-xs text-[#8892a4] mb-1">{label}</label>
+              <input
+                type="text"
+                placeholder={placeholder}
+                value={(form as any)[key]}
+                onChange={(e) => setForm((f) => ({ ...f, [key]: e.target.value }))}
+                className="w-full bg-[#0d0f14] border border-[#1e2028] rounded-lg px-3 py-2 text-sm text-[#e8eaf0] placeholder-[#3a3d4a] focus:outline-none focus:border-[#00d4ff]"
+              />
+            </div>
+          ))}
+          <div>
+            <label className="block text-xs text-[#8892a4] mb-1">Risk Tier</label>
+            <select
+              value={form.risk_tier}
+              onChange={(e) => setForm((f) => ({ ...f, risk_tier: e.target.value }))}
+              className="w-full bg-[#0d0f14] border border-[#1e2028] rounded-lg px-3 py-2 text-sm text-[#e8eaf0] focus:outline-none focus:border-[#00d4ff]"
+            >
+              {['critical', 'high', 'medium', 'low'].map((t) => (
+                <option key={t} value={t}>{t.charAt(0).toUpperCase() + t.slice(1)}</option>
+              ))}
+            </select>
+          </div>
+        </div>
+        <div className="flex gap-3 mt-5">
+          <button onClick={onClose} className="flex-1 border border-[#1e2028] text-[#8892a4] rounded-lg py-2 text-sm hover:border-[#2a2d3a] transition-colors">
+            Cancel
+          </button>
+          <button
+            onClick={() => { onSave(form); onClose(); }}
+            disabled={!form.name}
+            className="flex-1 cyber-btn text-sm py-2"
+          >
+            Add Vendor
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+interface QuestionnaireModalProps {
+  vendor: any;
+  questions: any[];
+  onClose: () => void;
+}
+
+function QuestionnaireModal({ vendor, questions, onClose }: QuestionnaireModalProps) {
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 overflow-y-auto py-8">
+      <div className="bg-[#111318] border border-[#1e2028] rounded-xl p-6 w-full max-w-2xl mx-4">
+        <div className="flex items-center justify-between mb-4">
+          <div>
+            <h2 className="text-lg font-bold text-[#e8eaf0]">AI Security Questionnaire</h2>
+            <p className="text-xs text-[#8892a4] mt-0.5">Generated for {vendor.name}</p>
+          </div>
+          <button onClick={onClose} className="text-[#8892a4] hover:text-[#e8eaf0] text-xl">×</button>
+        </div>
+        <div className="space-y-4 max-h-[60vh] overflow-y-auto pr-2">
+          {questions.map((q: any, i: number) => (
+            <div key={i} className="bg-[#0d0f14] border border-[#1e2028] rounded-lg p-4">
+              <div className="flex items-start gap-3">
+                <span className="text-[#00d4ff] font-bold text-sm shrink-0">{i + 1}.</span>
+                <div className="space-y-2">
+                  <p className="text-sm text-[#e8eaf0]">{q.question}</p>
+                  <div className="flex items-center gap-2">
+                    <span className="text-[10px] px-1.5 py-0.5 rounded bg-[rgba(0,212,255,0.1)] border border-[rgba(0,212,255,0.3)] text-[#00d4ff]">
+                      {q.category}
+                    </span>
+                  </div>
+                  {q.rationale && (
+                    <p className="text-xs text-[#8892a4]"><span className="text-[#ffcc00]">Why:</span> {q.rationale}</p>
+                  )}
+                  {q.expected_answer && (
+                    <p className="text-xs text-[#8892a4]"><span className="text-[#00ff88]">Expected:</span> {q.expected_answer}</p>
+                  )}
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+        <button onClick={onClose} className="mt-4 w-full border border-[#1e2028] text-[#8892a4] rounded-lg py-2 text-sm hover:border-[#2a2d3a] transition-colors">
+          Close
+        </button>
+      </div>
+    </div>
+  );
+}
+
 export default function TPRMPage() {
   const [search, setSearch] = useState('');
   const [tierFilter, setTierFilter] = useState<'all' | RiskTier>('all');
+  const [showAddModal, setShowAddModal] = useState(false);
+  const [questionnaire, setQuestionnaire] = useState<{ vendor: any; questions: any[] } | null>(null);
+  const [generating, setGenerating] = useState<string | null>(null);
 
-  const filtered = vendors.filter((v) => {
-    if (tierFilter !== 'all' && v.tier !== tierFilter) return false;
-    if (search && !v.name.toLowerCase().includes(search.toLowerCase()) && !v.domain.toLowerCase().includes(search.toLowerCase())) return false;
+  const { data, isLoading } = useVendors();
+  const createVendor = useCreateVendor();
+  const generateQ = useGenerateQuestionnaire();
+
+  const vendors: any[] = data?.vendors ?? data ?? [];
+
+  const filtered = vendors.filter((v: any) => {
+    if (tierFilter !== 'all' && v.risk_tier !== tierFilter) return false;
+    if (search) {
+      const q = search.toLowerCase();
+      if (!v.name?.toLowerCase().includes(q) && !v.domain?.toLowerCase().includes(q)) return false;
+    }
     return true;
   });
 
-  const criticalCount = vendors.filter((v) => v.tier === 'critical').length;
-  const overdueCount = vendors.filter((v) => v.status === 'overdue').length;
-  const highRisk = vendors.filter((v) => v.techRiskScore >= 4).length;
+  const criticalCount = vendors.filter((v: any) => v.risk_tier === 'critical').length;
+  const overdueCount = vendors.filter((v: any) => v.assessment_status === 'overdue').length;
+  const highRisk = vendors.filter((v: any) => (v.technical_risk_score ?? 0) >= 4).length;
+
+  const handleGenerateQuestionnaire = async (vendor: any) => {
+    setGenerating(vendor.id);
+    try {
+      const result = await generateQ.mutateAsync(vendor.id);
+      setQuestionnaire({ vendor, questions: result.questions ?? [] });
+    } catch (err) {
+      console.error('Failed to generate questionnaire', err);
+    } finally {
+      setGenerating(null);
+    }
+  };
 
   return (
     <DashboardLayout>
       <div className="p-6 space-y-6 min-h-full">
-        {/* Header */}
         <div>
           <h1 className="text-xl font-bold text-[#e8eaf0]">Third Party Risk Management</h1>
           <p className="text-[#8892a4] text-sm mt-0.5">Vendor inventory, tech risk scoring and assessment tracking</p>
@@ -111,10 +187,10 @@ export default function TPRMPage() {
         {/* Summary stats */}
         <div className="grid grid-cols-4 gap-4">
           {[
-            { label: 'Total Vendors', value: vendors.length, color: '#00d4ff' },
-            { label: 'Critical Tier', value: criticalCount, color: '#ff3b3b' },
-            { label: 'Overdue Assessments', value: overdueCount, color: '#ffcc00' },
-            { label: 'High Tech Risk (≥4.0)', value: highRisk, color: '#ff6b35' },
+            { label: 'Total Vendors', value: isLoading ? '—' : vendors.length, color: '#00d4ff' },
+            { label: 'Critical Tier', value: isLoading ? '—' : criticalCount, color: '#ff3b3b' },
+            { label: 'Overdue Assessments', value: isLoading ? '—' : overdueCount, color: '#ffcc00' },
+            { label: 'High Tech Risk (≥4.0)', value: isLoading ? '—' : highRisk, color: '#ff6b35' },
           ].map((stat) => (
             <div key={stat.label} className="bg-[#111318] border border-[#1e2028] rounded-lg p-4">
               <div className="text-[#8892a4] text-xs uppercase tracking-wider mb-2">{stat.label}</div>
@@ -145,7 +221,7 @@ export default function TPRMPage() {
               </button>
             ))}
           </div>
-          <button className="cyber-btn text-sm ml-auto">+ Add Vendor</button>
+          <button onClick={() => setShowAddModal(true)} className="cyber-btn text-sm ml-auto">+ Add Vendor</button>
         </div>
 
         {/* Vendor table */}
@@ -153,7 +229,7 @@ export default function TPRMPage() {
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b border-[#1e2028]">
-                {['Vendor', 'Domain', 'Risk Tier', 'Tech Risk Score', 'Data Access', 'Last Assessed', 'Assessment Status', 'Findings', ''].map((h) => (
+                {['Vendor', 'Domain', 'Risk Tier', 'Tech Risk Score', 'Last Assessed', 'Status', 'Critical', 'High', ''].map((h) => (
                   <th key={h} className="text-left px-4 py-3 text-[10px] font-semibold text-[#8892a4] uppercase tracking-wider">
                     {h}
                   </th>
@@ -161,70 +237,98 @@ export default function TPRMPage() {
               </tr>
             </thead>
             <tbody>
-              {filtered.map((vendor) => (
-                <tr key={vendor.id} className="border-b border-[#1e2028] hover:bg-[#161b27] transition-colors">
-                  <td className="px-4 py-3">
-                    <div className="text-sm font-semibold text-[#e8eaf0]">{vendor.name}</div>
-                  </td>
-                  <td className="px-4 py-3 font-mono text-xs text-[#4fc3f7]">{vendor.domain}</td>
-                  <td className="px-4 py-3">
-                    <span className={`text-[10px] font-bold px-2 py-0.5 rounded border uppercase tracking-wide ${tierColors[vendor.tier].badge}`}>
-                      {vendor.tier}
-                    </span>
-                  </td>
-                  <td className="px-4 py-3">
-                    <div className="flex items-center gap-2">
-                      <span
-                        className="text-sm font-bold"
-                        style={{ color: vendor.techRiskScore >= 4 ? '#ff3b3b' : vendor.techRiskScore >= 3 ? '#ff6b35' : '#00ff88' }}
-                      >
-                        {vendor.techRiskScore.toFixed(1)}
-                      </span>
-                      <div className="w-12 h-1.5 bg-[#1e2028] rounded-full overflow-hidden">
-                        <div
-                          className="h-full rounded-full"
-                          style={{
-                            width: `${(vendor.techRiskScore / 10) * 100}%`,
-                            background: tierColors[vendor.tier].bar,
-                          }}
-                        />
-                      </div>
-                    </div>
-                  </td>
-                  <td className="px-4 py-3 text-xs text-[#8892a4]">{vendor.dataAccess}</td>
-                  <td className="px-4 py-3 font-mono text-xs text-[#8892a4]">{vendor.lastAssessed}</td>
-                  <td className="px-4 py-3">
-                    <span className={`text-[10px] font-semibold px-2 py-0.5 rounded border uppercase tracking-wide ${statusColors[vendor.status]}`}>
-                      {vendor.status}
-                    </span>
-                  </td>
-                  <td className="px-4 py-3">
-                    <div className="flex gap-2 text-xs font-mono">
-                      {vendor.findings.critical > 0 && (
-                        <span className="text-[#ff3b3b] font-bold">C:{vendor.findings.critical}</span>
-                      )}
-                      {vendor.findings.high > 0 && (
-                        <span className="text-[#ff6b35] font-bold">H:{vendor.findings.high}</span>
-                      )}
-                      {vendor.findings.medium > 0 && (
-                        <span className="text-[#ffcc00] font-bold">M:{vendor.findings.medium}</span>
-                      )}
-                      {vendor.findings.critical === 0 && vendor.findings.high === 0 && vendor.findings.medium === 0 && (
-                        <span className="text-[#00ff88]">Clean</span>
-                      )}
-                    </div>
-                  </td>
-                  <td className="px-4 py-3">
-                    <button className="text-xs text-[#00d4ff] border border-[rgba(0,212,255,0.3)] px-2 py-1 rounded hover:bg-[rgba(0,212,255,0.1)] transition-colors">
-                      Scan
-                    </button>
-                  </td>
-                </tr>
-              ))}
+              {isLoading
+                ? Array.from({ length: 6 }).map((_, i) => <SkeletonRow key={i} cols={9} />)
+                : filtered.length === 0
+                ? (
+                  <tr>
+                    <td colSpan={9} className="px-4 py-8 text-center text-[#8892a4]">
+                      No vendors yet. Add your first vendor above.
+                    </td>
+                  </tr>
+                )
+                : filtered.map((vendor: any) => {
+                  const tier = (vendor.risk_tier ?? 'medium') as RiskTier;
+                  const tc = tierColors[tier] ?? tierColors.medium;
+                  const score = vendor.technical_risk_score ?? 0;
+                  const status = vendor.assessment_status ?? 'pending';
+                  return (
+                    <tr key={vendor.id} className="border-b border-[#1e2028] hover:bg-[#161b27] transition-colors">
+                      <td className="px-4 py-3">
+                        <div className="text-sm font-semibold text-[#e8eaf0]">{vendor.name}</div>
+                      </td>
+                      <td className="px-4 py-3 font-mono text-xs text-[#4fc3f7]">{vendor.domain ?? '—'}</td>
+                      <td className="px-4 py-3">
+                        <span className={`text-[10px] font-bold px-2 py-0.5 rounded border uppercase tracking-wide ${tc.badge}`}>
+                          {tier}
+                        </span>
+                      </td>
+                      <td className="px-4 py-3">
+                        <div className="flex items-center gap-2">
+                          <span
+                            className="text-sm font-bold"
+                            style={{ color: score >= 4 ? '#ff3b3b' : score >= 3 ? '#ff6b35' : '#00ff88' }}
+                          >
+                            {score > 0 ? score.toFixed(1) : '—'}
+                          </span>
+                          {score > 0 && (
+                            <div className="w-12 h-1.5 bg-[#1e2028] rounded-full overflow-hidden">
+                              <div
+                                className="h-full rounded-full"
+                                style={{ width: `${(score / 10) * 100}%`, background: tc.bar }}
+                              />
+                            </div>
+                          )}
+                        </div>
+                      </td>
+                      <td className="px-4 py-3 font-mono text-xs text-[#8892a4]">
+                        {vendor.last_assessed_at
+                          ? new Date(vendor.last_assessed_at).toLocaleDateString()
+                          : '—'}
+                      </td>
+                      <td className="px-4 py-3">
+                        <span className={`text-[10px] font-semibold px-2 py-0.5 rounded border uppercase tracking-wide ${assessmentColors[status] ?? assessmentColors.pending}`}>
+                          {status}
+                        </span>
+                      </td>
+                      <td className="px-4 py-3 text-xs font-bold text-[#ff3b3b]">
+                        {vendor.critical_findings > 0 ? vendor.critical_findings : '—'}
+                      </td>
+                      <td className="px-4 py-3 text-xs font-bold text-[#ff6b35]">
+                        {vendor.high_findings > 0 ? vendor.high_findings : '—'}
+                      </td>
+                      <td className="px-4 py-3">
+                        <button
+                          onClick={() => handleGenerateQuestionnaire(vendor)}
+                          disabled={generating === vendor.id}
+                          className="text-xs text-[#00d4ff] border border-[rgba(0,212,255,0.3)] px-2 py-1 rounded hover:bg-[rgba(0,212,255,0.1)] transition-colors disabled:opacity-50"
+                        >
+                          {generating === vendor.id ? 'Generating...' : 'Questionnaire'}
+                        </button>
+                      </td>
+                    </tr>
+                  );
+                })
+              }
             </tbody>
           </table>
         </div>
       </div>
+
+      {showAddModal && (
+        <AddVendorModal
+          onClose={() => setShowAddModal(false)}
+          onSave={(data) => createVendor.mutate(data)}
+        />
+      )}
+
+      {questionnaire && (
+        <QuestionnaireModal
+          vendor={questionnaire.vendor}
+          questions={questionnaire.questions}
+          onClose={() => setQuestionnaire(null)}
+        />
+      )}
     </DashboardLayout>
   );
 }

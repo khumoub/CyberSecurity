@@ -452,3 +452,20 @@ async def get_patch_priority(
     svc = RiskScoringService()
     priority = await svc.get_patch_priority(effective_org_id, db)
     return {"items": priority, "total": len(priority)}
+
+
+@router.get("/patch-priority-ai")
+async def get_patch_priority_ai(
+    org_id: Optional[uuid.UUID] = Query(None),
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """AI-ranked patch priority queue using Claude API for contextual recommendations."""
+    from services.risk_scoring import RiskScoringService
+    from services.claude_service import get_ai_patch_priority
+    effective_org_id = str(org_id or current_user.org_id)
+    svc = RiskScoringService()
+    priority = await svc.get_patch_priority(effective_org_id, db)
+    # Enrich with Claude AI recommendations
+    enriched = await get_ai_patch_priority(priority)
+    return {"items": enriched, "total": len(enriched), "ai_powered": bool(settings.CLAUDE_API_KEY)}

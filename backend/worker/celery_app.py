@@ -28,6 +28,8 @@ celery_app = Celery(
         "worker.tasks.lynis_task",
         "worker.tasks.lan_discovery_task",
         "worker.tasks.whois_task",
+        "worker.tasks.recon_ng_task",
+        "worker.tasks.pcap_task",
     ],
 )
 
