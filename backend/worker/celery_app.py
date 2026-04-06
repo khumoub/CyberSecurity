@@ -20,6 +20,14 @@ celery_app = Celery(
         "worker.tasks.wpscan_task",
         "worker.tasks.sla_task",
         "worker.tasks.intel_task",
+        "worker.tasks.wfuzz_task",
+        "worker.tasks.zaproxy_task",
+        "worker.tasks.hydra_task",
+        "worker.tasks.hashid_task",
+        "worker.tasks.hashcat_task",
+        "worker.tasks.lynis_task",
+        "worker.tasks.lan_discovery_task",
+        "worker.tasks.whois_task",
     ],
 )
 

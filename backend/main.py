@@ -4,6 +4,7 @@ from contextlib import asynccontextmanager
 from core.config import settings
 from core.database import engine, Base
 from api.routers import auth, assets, scans, findings, tools, reports, webhooks, billing
+from api.routers import intel, scan_ws, dashboard, mitre
 
 
 @asynccontextmanager
@@ -38,6 +39,11 @@ app.include_router(tools.router, prefix="/api/v1/tools", tags=["tools"])
 app.include_router(reports.router, prefix="/api/v1/reports", tags=["reports"])
 app.include_router(webhooks.router, prefix="/api/v1/webhooks", tags=["webhooks"])
 app.include_router(billing.router, prefix="/api/v1/billing", tags=["billing"])
+app.include_router(intel.router, prefix="/api/v1/intel", tags=["intel"])
+app.include_router(dashboard.router, prefix="/api/v1/dashboard", tags=["dashboard"])
+app.include_router(mitre.router, prefix="/api/v1/mitre", tags=["mitre"])
+# WebSocket — no prefix, handled directly
+app.include_router(scan_ws.router, tags=["websocket"])
 
 
 @app.get("/api/health")
