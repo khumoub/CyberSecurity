@@ -11,7 +11,7 @@ import uuid
 import json
 import psycopg2
 from datetime import datetime, timezone
-from api.dependencies import get_current_user
+from core.security import get_current_user
 from core.config import settings
 from models.user import User
 

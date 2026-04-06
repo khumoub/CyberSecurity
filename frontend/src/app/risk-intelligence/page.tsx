@@ -173,9 +173,9 @@ export default function RiskIntelligencePage() {
                           </div>
                         </div>
                       </td>
-                      <td className="px-4 py-3 text-xs font-bold text-[#ff3b3b]">{asset.critical_count ?? asset.critical || '—'}</td>
-                      <td className="px-4 py-3 text-xs font-bold text-[#ff6b35]">{asset.high_count ?? asset.high || '—'}</td>
-                      <td className="px-4 py-3 text-xs font-bold text-[#ffcc00]">{asset.medium_count ?? asset.medium || '—'}</td>
+                      <td className="px-4 py-3 text-xs font-bold text-[#ff3b3b]">{(asset.critical_count ?? asset.critical) || '—'}</td>
+                      <td className="px-4 py-3 text-xs font-bold text-[#ff6b35]">{(asset.high_count ?? asset.high) || '—'}</td>
+                      <td className="px-4 py-3 text-xs font-bold text-[#ffcc00]">{(asset.medium_count ?? asset.medium) || '—'}</td>
                       <td className="px-4 py-3">
                         <MiniSparkline data={asset.trend ?? []} />
                       </td>

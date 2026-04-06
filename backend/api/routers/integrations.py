@@ -12,7 +12,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
 import psycopg2
 import httpx
-from api.dependencies import get_current_user
+from core.security import get_current_user
 from core.config import settings
 from models.user import User
 

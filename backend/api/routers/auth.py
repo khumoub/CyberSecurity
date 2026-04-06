@@ -1,7 +1,9 @@
 import uuid
 import re
 from datetime import datetime, timezone
+from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, status
+from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from core.database import get_db
@@ -150,10 +152,6 @@ class OrgUpdateRequest(BaseModel):
     name: Optional[str] = None
     domain: Optional[str] = None
     timezone: Optional[str] = None
-
-
-from pydantic import BaseModel
-from typing import Optional
 
 
 @router.patch("/organization")
