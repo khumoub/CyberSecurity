@@ -5,6 +5,7 @@ from core.config import settings
 from core.database import engine, Base
 from api.routers import auth, assets, scans, findings, tools, reports, webhooks, billing
 from api.routers import intel, scan_ws, dashboard, mitre, remediation, tprm, users
+from api.routers import scan_policies, integrations
 
 
 @asynccontextmanager
@@ -45,6 +46,8 @@ app.include_router(mitre.router, prefix="/api/v1/mitre", tags=["mitre"])
 app.include_router(remediation.router, prefix="/api/v1/remediation", tags=["remediation"])
 app.include_router(tprm.router, prefix="/api/v1/tprm", tags=["tprm"])
 app.include_router(users.router, prefix="/api/v1/users", tags=["users"])
+app.include_router(scan_policies.router, prefix="/api/v1/scan-policies", tags=["scan-policies"])
+app.include_router(integrations.router, prefix="/api/v1/integrations", tags=["integrations"])
 # WebSocket — no prefix, handled directly
 app.include_router(scan_ws.router, tags=["websocket"])
 

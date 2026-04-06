@@ -562,3 +562,224 @@ async def get_attack_paths(
             "critical_nodes": sum(1 for n in nodes if n["risk"] == "critical"),
         },
     }
+
+
+# ── VPR: Vulnerability Priority Rating ──────────────────────────────────────
+
+@router.get("/vpr")
+async def get_vpr_scores(
+    limit: int = Query(50, le=200),
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Vulnerability Priority Rating: composite score combining:
+    - CVSS base score
+    - EPSS score (real-world exploit probability)
+    - Asset business criticality (critical_weight from asset tags/type)
+    - KEV status (2x multiplier)
+    - Exploit availability (1.5x multiplier)
+    Normalized to 0-10.
+    """
+    result = await db.execute(
+        select(
+            Finding.id,
+            Finding.title,
+            Finding.severity,
+            Finding.cvss_score,
+            Finding.epss_score,
+            Finding.is_known_exploited,
+            Finding.exploit_available,
+            Finding.cve_id,
+            Finding.affected_component,
+            Finding.status,
+            Asset.name.label("asset_name"),
+            Asset.asset_type,
+            Asset.criticality_score,
+        )
+        .outerjoin(Asset, Asset.id == Finding.asset_id)
+        .where(Finding.org_id == current_user.org_id)
+        .where(Finding.status.notin_(["resolved", "false_positive", "accepted_risk"]))
+        .limit(500)
+    )
+    rows = result.all()
+
+    SEV_BASE = {"critical": 10.0, "high": 7.5, "medium": 5.0, "low": 2.5, "info": 1.0}
+    ASSET_CRITICALITY = {"critical": 2.0, "high": 1.5, "medium": 1.0, "low": 0.75}
+
+    scored = []
+    for row in rows:
+        base = SEV_BASE.get(row.severity or "info", 1.0)
+        # CVSS factor
+        cvss = float(row.cvss_score or 0)
+        cvss_f = (cvss / 10.0) if cvss > 0 else 0.5
+        # EPSS factor
+        epss = float(row.epss_score or 0)
+        epss_f = 1.0 + epss * 2.0  # EPSS 0.5 = 2x multiplier
+        # KEV + exploit
+        kev_f = 2.0 if row.is_known_exploited else 1.0
+        exploit_f = 1.5 if row.exploit_available else 1.0
+        # Asset criticality
+        asset_crit = getattr(row, 'criticality_score', None)
+        if asset_crit:
+            asset_f = min(float(asset_crit) / 5.0 + 0.5, 2.0)
+        else:
+            asset_type = (row.asset_type or "").lower()
+            asset_f = ASSET_CRITICALITY.get(
+                "critical" if "prod" in asset_type or "db" in asset_type else
+                "high" if "server" in asset_type else "medium",
+                1.0
+            )
+
+        raw = base * cvss_f * epss_f * kev_f * exploit_f * asset_f
+        vpr = round(min(raw / 8.0, 10.0), 2)
+
+        scored.append({
+            "finding_id": str(row.id),
+            "title": row.title,
+            "severity": row.severity,
+            "cvss_score": cvss,
+            "epss_score": epss,
+            "is_known_exploited": row.is_known_exploited,
+            "exploit_available": row.exploit_available,
+            "cve_id": row.cve_id,
+            "affected_component": row.affected_component,
+            "status": row.status,
+            "asset_name": row.asset_name,
+            "asset_type": row.asset_type,
+            "vpr_score": vpr,
+            "vpr_factors": {
+                "cvss_factor": round(cvss_f, 2),
+                "epss_factor": round(epss_f, 2),
+                "kev_factor": kev_f,
+                "exploit_factor": exploit_f,
+                "asset_criticality_factor": round(asset_f, 2),
+            },
+        })
+
+    scored.sort(key=lambda x: x["vpr_score"], reverse=True)
+    return {"findings": scored[:limit], "total": len(scored)}
+
+
+# ── Attack Path Chaining (Multi-hop) ────────────────────────────────────────
+
+@router.get("/attack-path-chains")
+async def get_attack_path_chains(
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Multi-hop attack path analysis:
+    - Builds a graph of assets connected by shared CVEs
+    - Finds chains: entry point → pivot → critical target
+    - Calculates chain risk score and recommends highest-impact fix
+    """
+    # Get all assets with their findings
+    findings_result = await db.execute(
+        select(Finding.asset_id, Finding.cve_id, Finding.severity, Finding.is_known_exploited, Finding.exploit_available)
+        .where(Finding.org_id == current_user.org_id)
+        .where(Finding.cve_id.isnot(None))
+        .where(Finding.status.notin_(["resolved", "false_positive"]))
+    )
+    finding_rows = findings_result.all()
+
+    assets_result = await db.execute(
+        select(Asset.id, Asset.name, Asset.asset_type, Asset.ip_address)
+        .where(Asset.org_id == current_user.org_id)
+        .where(Asset.is_active == True)
+    )
+    asset_rows = {str(r.id): {"name": r.name, "type": r.asset_type, "ip": r.ip_address} for r in assets_result.all()}
+
+    # Build adjacency via shared CVEs
+    import collections
+    cve_assets = collections.defaultdict(set)
+    asset_vulns = collections.defaultdict(list)
+
+    for asset_id, cve_id, severity, is_kev, has_exploit in finding_rows:
+        aid = str(asset_id)
+        cve_assets[cve_id].add(aid)
+        asset_vulns[aid].append({
+            "cve_id": cve_id, "severity": severity,
+            "is_kev": is_kev, "has_exploit": has_exploit
+        })
+
+    # Build adjacency list (edges between assets sharing CVEs)
+    adjacency = collections.defaultdict(list)  # asset_id -> [(neighbor_id, shared_cve)]
+    for cve_id, aids in cve_assets.items():
+        aids_list = list(aids)
+        for i in range(len(aids_list)):
+            for j in range(i + 1, len(aids_list)):
+                adjacency[aids_list[i]].append((aids_list[j], cve_id))
+                adjacency[aids_list[j]].append((aids_list[i], cve_id))
+
+    SEV_SCORE = {"critical": 10, "high": 7, "medium": 4, "low": 1, "info": 0}
+
+    def asset_risk(aid):
+        vulns = asset_vulns.get(aid, [])
+        if not vulns:
+            return 0
+        return max(SEV_SCORE.get(v["severity"], 0) for v in vulns)
+
+    # Find chains using BFS (max depth 4 hops)
+    chains = []
+    visited_chains = set()
+
+    def bfs_chains(start, max_depth=4):
+        """Find all paths from start up to max_depth hops."""
+        queue = [(start, [start], [], 0)]
+        while queue:
+            node, path, cves, depth = queue.pop(0)
+            if depth >= max_depth:
+                continue
+            for neighbor, cve in adjacency.get(node, []):
+                if neighbor not in path:
+                    new_path = path + [neighbor]
+                    new_cves = cves + [cve]
+                    path_key = "->".join(sorted(new_path))
+                    if path_key not in visited_chains and len(new_path) >= 2:
+                        visited_chains.add(path_key)
+                        chain_risk = sum(asset_risk(n) for n in new_path)
+                        chains.append({
+                            "path": new_path,
+                            "path_labels": [asset_rows.get(n, {}).get("name", n) for n in new_path],
+                            "shared_cves": new_cves,
+                            "hop_count": len(new_path) - 1,
+                            "chain_risk_score": chain_risk,
+                            "entry_point": asset_rows.get(new_path[0], {}).get("name", new_path[0]),
+                            "target": asset_rows.get(new_path[-1], {}).get("name", new_path[-1]),
+                            "has_kev": any(
+                                v["is_kev"] for aid in new_path
+                                for v in asset_vulns.get(aid, [])
+                                if v["cve_id"] in new_cves
+                            ),
+                        })
+                    queue.append((neighbor, new_path, new_cves, depth + 1))
+
+    # Start BFS from each asset (limit to top 15 by risk)
+    sorted_assets = sorted(asset_vulns.keys(), key=asset_risk, reverse=True)[:15]
+    for start_asset in sorted_assets:
+        bfs_chains(start_asset)
+
+    # Sort chains by risk score + hop count
+    chains.sort(key=lambda c: (c["chain_risk_score"], c["hop_count"]), reverse=True)
+    top_chains = chains[:20]
+
+    # Identify the single most impactful CVE fix (breaks the most chains)
+    cve_chain_count = collections.Counter()
+    for chain in top_chains:
+        for cve in chain["shared_cves"]:
+            cve_chain_count[cve] += 1
+    top_fix = cve_chain_count.most_common(1)
+    recommended_fix = {
+        "cve_id": top_fix[0][0],
+        "chains_broken": top_fix[0][1],
+        "message": f"Fixing {top_fix[0][0]} would break {top_fix[0][1]} attack path(s)"
+    } if top_fix else None
+
+    return {
+        "chains": top_chains,
+        "total_chains": len(chains),
+        "max_hop_count": max((c["hop_count"] for c in chains), default=0),
+        "recommended_fix": recommended_fix,
+        "assets_analyzed": len(sorted_assets),
+    }

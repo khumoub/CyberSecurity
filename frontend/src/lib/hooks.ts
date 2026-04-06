@@ -314,3 +314,208 @@ export function useWebhooks() {
     queryFn: () => api.get('/webhooks').then((r) => r.data),
   });
 }
+
+// ── Scan Policies ─────────────────────────────────────────────────────────────
+export function useScanPolicies() {
+  return useQuery({
+    queryKey: ['scan-policies'],
+    queryFn: () => api.get('/scan-policies/').then((r) => r.data),
+  });
+}
+
+export function useCreateScanPolicy() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (body: Record<string, unknown>) => api.post('/scan-policies/', body).then((r) => r.data),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['scan-policies'] }),
+  });
+}
+
+export function useUpdateScanPolicy() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, ...body }: { id: string } & Record<string, unknown>) =>
+      api.patch(`/scan-policies/${id}`, body).then((r) => r.data),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['scan-policies'] }),
+  });
+}
+
+export function useDeleteScanPolicy() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => api.delete(`/scan-policies/${id}`).then((r) => r.data),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['scan-policies'] }),
+  });
+}
+
+export function useRunScanPolicyNow() {
+  return useMutation({
+    mutationFn: (id: string) => api.post(`/scan-policies/${id}/run-now`).then((r) => r.data),
+  });
+}
+
+export function useScanPolicyPresets() {
+  return useQuery({
+    queryKey: ['scan-policies', 'presets'],
+    queryFn: () => api.get('/scan-policies/presets/list').then((r) => r.data),
+  });
+}
+
+// ── Integrations ──────────────────────────────────────────────────────────────
+export function useIntegrationStatus() {
+  return useQuery({
+    queryKey: ['integrations', 'status'],
+    queryFn: () => api.get('/integrations/status').then((r) => r.data),
+  });
+}
+
+export function useJiraConfig() {
+  return useQuery({
+    queryKey: ['integrations', 'jira', 'config'],
+    queryFn: () => api.get('/integrations/jira/config').then((r) => r.data),
+  });
+}
+
+export function useSaveJiraConfig() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (body: Record<string, unknown>) => api.put('/integrations/jira/config', body).then((r) => r.data),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['integrations'] }),
+  });
+}
+
+export function useCreateJiraIssue() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (body: { finding_id: string; summary_override?: string; assignee?: string }) =>
+      api.post('/integrations/jira/issues', body).then((r) => r.data),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['integrations', 'jira', 'issues'] }),
+  });
+}
+
+export function useJiraIssues() {
+  return useQuery({
+    queryKey: ['integrations', 'jira', 'issues'],
+    queryFn: () => api.get('/integrations/jira/issues').then((r) => r.data),
+  });
+}
+
+export function useSyncJiraStatus() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (finding_id: string) => api.post(`/integrations/jira/sync/${finding_id}`).then((r) => r.data),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['integrations', 'jira', 'issues'] }),
+  });
+}
+
+export function useSlackConfig() {
+  return useQuery({
+    queryKey: ['integrations', 'slack', 'config'],
+    queryFn: () => api.get('/integrations/slack/config').then((r) => r.data),
+  });
+}
+
+export function useSaveSlackConfig() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (body: Record<string, unknown>) => api.put('/integrations/slack/config', body).then((r) => r.data),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['integrations'] }),
+  });
+}
+
+export function useSendSlackAlert() {
+  return useMutation({
+    mutationFn: (finding_id: string) => api.post('/integrations/slack/alert', { finding_id }).then((r) => r.data),
+  });
+}
+
+// ── Intel: VPR + Attack Path Chains ──────────────────────────────────────────
+export function useVprScores(limit = 50) {
+  const orgId = useOrgId();
+  return useQuery({
+    queryKey: ['intel', 'vpr', orgId, limit],
+    queryFn: () => api.get(`/intel/vpr?org_id=${orgId}&limit=${limit}`).then((r) => r.data),
+    enabled: !!orgId,
+  });
+}
+
+export function useAttackPathChains() {
+  const orgId = useOrgId();
+  return useQuery({
+    queryKey: ['intel', 'attack-path-chains', orgId],
+    queryFn: () => api.get(`/intel/attack-path-chains?org_id=${orgId}`).then((r) => r.data),
+    enabled: !!orgId,
+  });
+}
+
+// ── Compliance Reports ────────────────────────────────────────────────────────
+export function useComplianceFrameworks() {
+  return useQuery({
+    queryKey: ['reports', 'compliance', 'frameworks'],
+    queryFn: () => api.get('/reports/compliance/frameworks').then((r) => r.data),
+  });
+}
+
+export function useGenerateComplianceReport() {
+  return useMutation({
+    mutationFn: ({ framework, options }: { framework: string; options: Record<string, unknown> }) =>
+      api.post(`/reports/compliance/${framework}`, options).then((r) => r.data),
+    onSuccess: (data) => {
+      if (data.html_base64) {
+        const html = atob(data.html_base64);
+        const blob = new Blob([html], { type: 'text/html' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = data.filename || 'compliance-report.html';
+        a.click();
+        URL.revokeObjectURL(url);
+      }
+    },
+  });
+}
+
+// ── New Tool Mutations ────────────────────────────────────────────────────────
+export function useRunCredentialedScan() {
+  return useMutation({
+    mutationFn: (body: Record<string, unknown>) => api.post('/tools/credentialed-scan', body).then((r) => r.data),
+  });
+}
+
+export function useRunExploitVerify() {
+  return useMutation({
+    mutationFn: (body: { finding_id: string; target?: string; authorized: boolean }) =>
+      api.post('/tools/exploit-verify', body).then((r) => r.data),
+  });
+}
+
+export function useRunAdAttacks() {
+  return useMutation({
+    mutationFn: (body: Record<string, unknown>) => api.post('/tools/ad-attacks', body).then((r) => r.data),
+  });
+}
+
+export function useRunFixVerify() {
+  return useMutation({
+    mutationFn: (body: { finding_id: string; target?: string }) =>
+      api.post('/tools/fix-verify', body).then((r) => r.data),
+  });
+}
+
+export function useRunContainerScan() {
+  return useMutation({
+    mutationFn: (body: Record<string, unknown>) => api.post('/tools/container-scan', body).then((r) => r.data),
+  });
+}
+
+export function useRunCisAudit() {
+  return useMutation({
+    mutationFn: (body: Record<string, unknown>) => api.post('/tools/cis-audit', body).then((r) => r.data),
+  });
+}
+
+export function useRunEasm() {
+  return useMutation({
+    mutationFn: (body: Record<string, unknown>) => api.post('/tools/easm', body).then((r) => r.data),
+  });
+}

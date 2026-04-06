@@ -805,3 +805,216 @@ async def upload_pcap(
         "filename": file.filename,
         "message": "PCAP uploaded and queued for analysis. Connect to /ws/scan/{scan_id} for live output.",
     }
+
+
+# ── New Tool Endpoints ────────────────────────────────────────────────────────
+
+class CredentialedScanRequest(BaseModel):
+    target: str
+    asset_id: Optional[uuid.UUID] = None
+    username: str = "root"
+    ssh_key_path: Optional[str] = None
+    password: Optional[str] = None
+    check_kernel: bool = True
+    check_services: bool = True
+
+
+class ExploitVerifyRequest(BaseModel):
+    finding_id: str
+    target: Optional[str] = None
+    authorized: bool = False
+
+
+class AdAttacksRequest(BaseModel):
+    target: str
+    asset_id: Optional[uuid.UUID] = None
+    domain: str
+    username: Optional[str] = None
+    password: Optional[str] = None
+    dc_ip: Optional[str] = None
+    attacks: Optional[List[str]] = ["kerberoasting", "asrep", "enum"]
+    hash: Optional[str] = None
+    authorized: bool = False
+
+
+class RemediationVerifyRequest(BaseModel):
+    finding_id: str
+    target: Optional[str] = None
+
+
+class ContainerScanRequest(BaseModel):
+    image: str
+    asset_id: Optional[uuid.UUID] = None
+    scan_type: str = "image"  # image, fs, repo, dockerfile
+    dockerfile_path: Optional[str] = None
+
+
+class CisAuditRequest(BaseModel):
+    target: str
+    asset_id: Optional[uuid.UUID] = None
+    username: str = "root"
+    ssh_key_path: Optional[str] = None
+    password: Optional[str] = None
+    checks: Optional[List[str]] = None
+    benchmark: str = "generic"
+
+
+class EasmRequest(BaseModel):
+    domain: str
+    asset_id: Optional[uuid.UUID] = None
+    auto_add_assets: bool = True
+    port_scan: bool = True
+    alert_new: bool = True
+
+
+@router.post("/credentialed-scan", response_model=dict, status_code=status.HTTP_202_ACCEPTED)
+async def run_credentialed_scan(
+    request: CredentialedScanRequest,
+    current_user: User = Depends(get_current_user),
+):
+    """SSH-based credentialed scan: software inventory + vuln matching + config checks."""
+    if current_user.role not in ("admin", "analyst"):
+        raise HTTPException(status_code=403, detail="Admin or analyst role required")
+    scan_id = _dispatch_task(
+        "worker.tasks.credentialed_scan_task.run_credentialed_scan",
+        str(current_user.org_id),
+        str(request.asset_id) if request.asset_id else None,
+        request.target,
+        {
+            "username": request.username,
+            "ssh_key_path": request.ssh_key_path,
+            "password": request.password,
+            "check_kernel": request.check_kernel,
+            "check_services": request.check_services,
+        },
+    )
+    return {"scan_id": scan_id, "status": "queued", "message": "Credentialed scan queued"}
+
+
+@router.post("/exploit-verify", response_model=dict, status_code=status.HTTP_202_ACCEPTED)
+async def run_exploit_verify(
+    request: ExploitVerifyRequest,
+    current_user: User = Depends(get_current_user),
+):
+    """Attempt to prove a finding is actually exploitable via nuclei/HTTP PoC/Metasploit."""
+    if current_user.role not in ("admin", "analyst"):
+        raise HTTPException(status_code=403, detail="Admin or analyst role required")
+    if not request.authorized:
+        raise HTTPException(status_code=400, detail="Set authorized=true to confirm you own/have permission to test this target")
+    scan_id = _dispatch_task(
+        "worker.tasks.exploit_verify_task.verify_exploitability",
+        str(current_user.org_id),
+        None,
+        request.finding_id,
+        {"authorized": True, "target": request.target},
+    )
+    return {"scan_id": scan_id, "status": "queued", "message": "Exploit verification queued"}
+
+
+@router.post("/ad-attacks", response_model=dict, status_code=status.HTTP_202_ACCEPTED)
+async def run_ad_attacks(
+    request: AdAttacksRequest,
+    current_user: User = Depends(get_current_user),
+):
+    """Active Directory attack simulation: Kerberoasting, AS-REP Roasting, PtH."""
+    if current_user.role not in ("admin", "analyst"):
+        raise HTTPException(status_code=403, detail="Admin or analyst role required")
+    if not request.authorized:
+        raise HTTPException(status_code=400, detail="Set authorized=true to confirm you own/have permission to test this AD environment")
+    scan_id = _dispatch_task(
+        "worker.tasks.ad_attacks_task.run_ad_attacks",
+        str(current_user.org_id),
+        str(request.asset_id) if request.asset_id else None,
+        request.target,
+        {
+            "authorized": True,
+            "domain": request.domain,
+            "username": request.username,
+            "password": request.password,
+            "dc_ip": request.dc_ip or request.target,
+            "attacks": request.attacks,
+            "hash": request.hash,
+        },
+    )
+    return {"scan_id": scan_id, "status": "queued", "message": "AD attack simulation queued"}
+
+
+@router.post("/fix-verify", response_model=dict, status_code=status.HTTP_202_ACCEPTED)
+async def run_fix_verify(
+    request: RemediationVerifyRequest,
+    current_user: User = Depends(get_current_user),
+):
+    """Re-run check for a specific finding to verify if the fix was effective."""
+    scan_id = _dispatch_task(
+        "worker.tasks.remediation_verify_task.verify_fix",
+        str(current_user.org_id),
+        None,
+        request.finding_id,
+        {"target": request.target},
+    )
+    return {"scan_id": scan_id, "status": "queued", "message": "Fix verification queued"}
+
+
+@router.post("/container-scan", response_model=dict, status_code=status.HTTP_202_ACCEPTED)
+async def run_container_scan(
+    request: ContainerScanRequest,
+    current_user: User = Depends(get_current_user),
+):
+    """Scan a container image for CVEs and misconfigurations (Trivy/Grype)."""
+    scan_id = _dispatch_task(
+        "worker.tasks.container_scan_task.run_container_scan",
+        str(current_user.org_id),
+        str(request.asset_id) if request.asset_id else None,
+        request.image,
+        {
+            "image": request.image,
+            "scan_type": request.scan_type,
+            "dockerfile_path": request.dockerfile_path,
+        },
+    )
+    return {"scan_id": scan_id, "status": "queued", "message": f"Container scan queued for {request.image}"}
+
+
+@router.post("/cis-audit", response_model=dict, status_code=status.HTTP_202_ACCEPTED)
+async def run_cis_audit(
+    request: CisAuditRequest,
+    current_user: User = Depends(get_current_user),
+):
+    """CIS Benchmark compliance audit via SSH (37 checks across filesystem, SSH, PAM, logging, network)."""
+    if current_user.role not in ("admin", "analyst"):
+        raise HTTPException(status_code=403, detail="Admin or analyst role required")
+    scan_id = _dispatch_task(
+        "worker.tasks.cis_audit_task.run_cis_audit",
+        str(current_user.org_id),
+        str(request.asset_id) if request.asset_id else None,
+        request.target,
+        {
+            "username": request.username,
+            "ssh_key_path": request.ssh_key_path,
+            "password": request.password,
+            "checks": request.checks,
+            "benchmark": request.benchmark,
+        },
+    )
+    return {"scan_id": scan_id, "status": "queued", "message": "CIS audit queued"}
+
+
+@router.post("/easm", response_model=dict, status_code=status.HTTP_202_ACCEPTED)
+async def run_easm(
+    request: EasmRequest,
+    current_user: User = Depends(get_current_user),
+):
+    """External Attack Surface Management: enumerate subdomains, resolve, port scan, detect new assets."""
+    scan_id = _dispatch_task(
+        "worker.tasks.easm_task.run_easm",
+        str(current_user.org_id),
+        str(request.asset_id) if request.asset_id else None,
+        request.domain,
+        {
+            "domain": request.domain,
+            "auto_add_assets": request.auto_add_assets,
+            "port_scan": request.port_scan,
+            "alert_new": request.alert_new,
+        },
+    )
+    return {"scan_id": scan_id, "status": "queued", "message": f"EASM scan queued for {request.domain}"}

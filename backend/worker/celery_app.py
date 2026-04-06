@@ -30,6 +30,13 @@ celery_app = Celery(
         "worker.tasks.whois_task",
         "worker.tasks.recon_ng_task",
         "worker.tasks.pcap_task",
+        "worker.tasks.credentialed_scan_task",
+        "worker.tasks.exploit_verify_task",
+        "worker.tasks.ad_attacks_task",
+        "worker.tasks.remediation_verify_task",
+        "worker.tasks.container_scan_task",
+        "worker.tasks.cis_audit_task",
+        "worker.tasks.easm_task",
     ],
 )
 
@@ -66,6 +73,10 @@ celery_app.conf.update(
         },
         "calculate-risk-scores": {
             "task": "worker.tasks.intel_task.calculate_risk_scores",
+            "schedule": 86400.0,     # daily
+        },
+        "easm-scheduled": {
+            "task": "worker.tasks.easm_task.run_easm_scheduled",
             "schedule": 86400.0,     # daily
         },
     },
