@@ -1,6 +1,7 @@
 'use client';
 import { useState } from 'react';
 import { useIntegrationStatus, useJiraConfig, useSaveJiraConfig, useJiraIssues, useSlackConfig, useSaveSlackConfig, useComplianceFrameworks, useGenerateComplianceReport } from '@/lib/hooks';
+import { DashboardLayout } from '@/components/layout/DashboardLayout';
 
 type Tab = 'jira' | 'slack' | 'compliance' | 'overview';
 
@@ -44,6 +45,7 @@ export default function IntegrationsPage() {
   const INTEGRATION_ICONS: Record<string, string> = { jira: '🔵', slack: '💬', splunk: '🔴', elastic: '🟡', teams: '🟣', pagerduty: '🟢' };
 
   return (
+    <DashboardLayout>
     <div style={{ padding: '32px', background: '#0a0a1a', minHeight: '100vh', color: '#e2e8f0' }}>
       <div style={{ maxWidth: 1100, margin: '0 auto' }}>
         <div style={{ marginBottom: 32 }}>
@@ -209,5 +211,6 @@ export default function IntegrationsPage() {
         )}
       </div>
     </div>
+    </DashboardLayout>
   );
 }

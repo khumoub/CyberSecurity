@@ -2,6 +2,7 @@
 import { useState } from 'react';
 import { useScanPolicies, useCreateScanPolicy, useUpdateScanPolicy, useDeleteScanPolicy, useRunScanPolicyNow, useScanPolicyPresets } from '@/lib/hooks';
 import { TerminalOutput } from '@/components/ui/TerminalOutput';
+import { DashboardLayout } from '@/components/layout/DashboardLayout';
 
 const TOOL_OPTIONS = [
   'nmap', 'nuclei', 'nikto', 'masscan', 'sslscan', 'whatweb',
@@ -56,6 +57,7 @@ export default function ScanPoliciesPage() {
   };
 
   return (
+    <DashboardLayout>
     <div style={{ padding: '32px', background: '#0a0a1a', minHeight: '100vh', color: '#e2e8f0' }}>
       <div style={{ maxWidth: 1100, margin: '0 auto' }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 32 }}>
@@ -200,5 +202,6 @@ export default function ScanPoliciesPage() {
         )}
       </div>
     </div>
+    </DashboardLayout>
   );
 }

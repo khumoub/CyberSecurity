@@ -144,3 +144,42 @@ async def logout(current_user: User = Depends(get_current_user)):
 @router.get("/me", response_model=UserResponse)
 async def get_me(current_user: User = Depends(get_current_user)):
     return UserResponse.model_validate(current_user)
+
+
+class OrgUpdateRequest(BaseModel):
+    name: Optional[str] = None
+    domain: Optional[str] = None
+    timezone: Optional[str] = None
+
+
+from pydantic import BaseModel
+from typing import Optional
+
+
+@router.patch("/organization")
+async def update_organization(
+    body: OrgUpdateRequest,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Update organization settings (name, domain, timezone)."""
+    if current_user.role != "admin":
+        raise HTTPException(status_code=403, detail="Admin role required")
+
+    result = await db.execute(
+        select(Organization).where(Organization.id == current_user.org_id)
+    )
+    org = result.scalar_one_or_none()
+    if not org:
+        raise HTTPException(status_code=404, detail="Organization not found")
+
+    if body.name is not None:
+        org.name = body.name
+    if body.domain is not None:
+        org.domain = body.domain
+    if body.timezone is not None:
+        org.timezone = body.timezone
+
+    await db.commit()
+    await db.refresh(org)
+    return {"id": str(org.id), "name": org.name, "domain": getattr(org, "domain", None), "timezone": getattr(org, "timezone", None)}

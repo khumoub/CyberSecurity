@@ -2,6 +2,7 @@
 import { useState } from 'react';
 import { useRunContainerScan, useRunCisAudit, useRunEasm, useScans } from '@/lib/hooks';
 import { TerminalOutput } from '@/components/ui/TerminalOutput';
+import { DashboardLayout } from '@/components/layout/DashboardLayout';
 
 type Tool = 'container' | 'cis' | 'easm';
 
@@ -49,6 +50,7 @@ export default function ContainerSecurityPage() {
   ];
 
   return (
+    <DashboardLayout>
     <div style={{ padding: '32px', background: '#0a0a1a', minHeight: '100vh', color: '#e2e8f0' }}>
       <div style={{ maxWidth: 1000, margin: '0 auto' }}>
         <div style={{ marginBottom: 32 }}>
@@ -198,5 +200,6 @@ export default function ContainerSecurityPage() {
         </div>
       </div>
     </div>
+    </DashboardLayout>
   );
 }

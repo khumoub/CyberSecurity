@@ -100,9 +100,61 @@ const moduleItems: NavItem[] = [
     ),
     badge: { text: 'RESTRICTED', color: 'text-[#ff3b3b] bg-[rgba(255,59,59,0.15)] border-[rgba(255,59,59,0.4)]' },
   },
+  {
+    label: 'Attack Paths',
+    href: '/attack-paths',
+    icon: (
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+        <polyline points="22 12 18 12 15 21 9 3 6 12 2 12" />
+      </svg>
+    ),
+  },
+  {
+    label: 'Container Security',
+    href: '/container-security',
+    icon: (
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+        <path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z" />
+      </svg>
+    ),
+  },
 ];
 
 const toolItems: NavItem[] = [
+  {
+    label: 'Scan Policies',
+    href: '/scan-policies',
+    icon: (
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+        <path d="M9 11l3 3L22 4" />
+        <path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11" />
+      </svg>
+    ),
+  },
+  {
+    label: 'Integrations',
+    href: '/integrations',
+    icon: (
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+        <rect x="2" y="7" width="6" height="10" rx="1" />
+        <rect x="16" y="7" width="6" height="10" rx="1" />
+        <path d="M8 12h8" />
+      </svg>
+    ),
+  },
+  {
+    label: 'Reporting',
+    href: '/reporting',
+    icon: (
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+        <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+        <polyline points="14 2 14 8 20 8" />
+        <line x1="16" y1="13" x2="8" y2="13" />
+        <line x1="16" y1="17" x2="8" y2="17" />
+        <polyline points="10 9 9 9 8 9" />
+      </svg>
+    ),
+  },
   {
     label: 'Tool Panels',
     href: '/tools',

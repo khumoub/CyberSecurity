@@ -542,3 +542,52 @@ async def map_finding_to_technique(
         "technique": technique_info,
         "auto_mapped": request.auto_map,
     }
+
+
+from pydantic import BaseModel as _BaseModel
+
+
+class SimulateRequest(_BaseModel):
+    technique_id: str
+
+
+@router.post("/simulate")
+async def simulate_technique(
+    request: SimulateRequest,
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Simulate running an atomic test for a MITRE ATT&CK technique.
+    Returns pass/fail outcome with detection notes.
+    """
+    tech = ATTACK_TECHNIQUES.get(request.technique_id)
+    if not tech:
+        raise HTTPException(status_code=404, detail=f"Technique {request.technique_id} not found")
+
+    import random
+    detected = random.random() > 0.45  # ~55% detection rate
+
+    DETECTION_NOTES = {
+        "T1110": "Brute force detected via failed login threshold alerts",
+        "T1190": "Exploit attempt blocked by WAF / IDS signature",
+        "T1059": "Command execution flagged by EDR process monitoring",
+        "T1078": "Valid credential use from unusual geolocation detected",
+        "T1046": "Port scan detected via network flow anomaly detection",
+        "T1083": "File enumeration flagged by file integrity monitoring",
+        "T1486": "Ransomware encryption pattern detected by honeypot files",
+        "T1041": "Data exfiltration detected via DLP on egress traffic",
+        "T1055": "Process injection flagged by EDR memory scanning",
+        "T1548": "Privilege escalation attempt detected by UEBA",
+    }
+
+    note = DETECTION_NOTES.get(request.technique_id[:5], "Simulation complete — review SIEM alerts for detection status")
+
+    return {
+        "technique_id": request.technique_id,
+        "technique_name": tech.get("name"),
+        "tactic": tech.get("tactic"),
+        "detected": detected,
+        "result": "DETECTED" if detected else "NOT DETECTED",
+        "detection_note": note if detected else "No detection triggered — consider tuning detection rules for this technique",
+        "simulated": True,
+    }
