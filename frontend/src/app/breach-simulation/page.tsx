@@ -4,7 +4,7 @@ import { useState } from 'react';
 import { DashboardLayout } from '@/components/layout/DashboardLayout';
 import { useMitreCoverage } from '@/lib/hooks';
 import { useMutation } from '@tanstack/react-query';
-import axios from 'axios';
+import api from '@/lib/api';
 
 interface AtomicTest {
   id: string;
@@ -92,12 +92,7 @@ const ransomwareScore = Math.round((passCount / ransomwareChecks.length) * 100);
 function useRunAtomicTest() {
   return useMutation({
     mutationFn: async (techniqueId: string) => {
-      const token = typeof window !== 'undefined' ? localStorage.getItem('access_token') : null;
-      const res = await axios.post(
-        `/api/v1/mitre/simulate`,
-        { technique_id: techniqueId },
-        { headers: token ? { Authorization: `Bearer ${token}` } : {} },
-      );
+      const res = await api.post('/mitre/simulate', { technique_id: techniqueId });
       return res.data;
     },
   });
