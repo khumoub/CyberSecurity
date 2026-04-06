@@ -19,7 +19,7 @@ export default function LoginPage() {
     setLoading(true);
 
     try {
-      const response = await api.post('/api/v1/auth/login', { email, password });
+      const response = await api.post('/auth/login', { email, password });
       const { user, access_token } = response.data;
       login(user, access_token);
       router.push('/dashboard');

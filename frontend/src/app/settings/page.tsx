@@ -5,34 +5,24 @@ import { DashboardLayout } from '@/components/layout/DashboardLayout';
 import { roleColors, roleLabels, type UserRole } from '@/lib/auth';
 import { useBillingPlans, useSubscription } from '@/lib/hooks';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import axios from 'axios';
+import api from '@/lib/api';
 
 const roles: UserRole[] = ['admin', 'analyst', 'junior_analyst', 'tprm_manager', 'read_only'];
-
-function authHeaders() {
-  const token = typeof window !== 'undefined' ? localStorage.getItem('access_token') : null;
-  return token ? { Authorization: `Bearer ${token}` } : {};
-}
 
 // ── Hooks ─────────────────────────────────────────────────────────────────────
 
 function useUsers() {
   return useQuery({
     queryKey: ['users'],
-    queryFn: async () => {
-      const res = await axios.get('/api/v1/users/', { headers: authHeaders() });
-      return res.data;
-    },
+    queryFn: () => api.get('/users/').then((r) => r.data),
   });
 }
 
 function useUpdateRole() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: async ({ userId, role }: { userId: string; role: string }) => {
-      const res = await axios.patch(`/api/v1/users/${userId}/role`, { role }, { headers: authHeaders() });
-      return res.data;
-    },
+    mutationFn: ({ userId, role }: { userId: string; role: string }) =>
+      api.patch(`/users/${userId}/role`, { role }).then((r) => r.data),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['users'] }),
   });
 }
@@ -40,10 +30,8 @@ function useUpdateRole() {
 function useToggleActive() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: async ({ userId, is_active }: { userId: string; is_active: boolean }) => {
-      const res = await axios.patch(`/api/v1/users/${userId}/active`, { is_active }, { headers: authHeaders() });
-      return res.data;
-    },
+    mutationFn: ({ userId, is_active }: { userId: string; is_active: boolean }) =>
+      api.patch(`/users/${userId}/active`, { is_active }).then((r) => r.data),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['users'] }),
   });
 }
@@ -51,10 +39,8 @@ function useToggleActive() {
 function useInviteUser() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: async (data: { email: string; full_name: string; role: string }) => {
-      const res = await axios.post('/api/v1/users/invite', data, { headers: authHeaders() });
-      return res.data;
-    },
+    mutationFn: (data: { email: string; full_name: string; role: string }) =>
+      api.post('/users/invite', data).then((r) => r.data),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['users'] }),
   });
 }
@@ -62,20 +48,15 @@ function useInviteUser() {
 function useApiKeys() {
   return useQuery({
     queryKey: ['api-keys'],
-    queryFn: async () => {
-      const res = await axios.get('/api/v1/users/api-keys', { headers: authHeaders() });
-      return res.data;
-    },
+    queryFn: () => api.get('/users/api-keys').then((r) => r.data),
   });
 }
 
 function useCreateApiKey() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: async (data: { name: string; scopes: string[] }) => {
-      const res = await axios.post('/api/v1/users/api-keys', data, { headers: authHeaders() });
-      return res.data;
-    },
+    mutationFn: (data: { name: string; scopes: string[] }) =>
+      api.post('/users/api-keys', data).then((r) => r.data),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['api-keys'] }),
   });
 }
@@ -83,19 +64,15 @@ function useCreateApiKey() {
 function useRevokeApiKey() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: async (keyId: string) => {
-      await axios.delete(`/api/v1/users/api-keys/${keyId}`, { headers: authHeaders() });
-    },
+    mutationFn: (keyId: string) => api.delete(`/users/api-keys/${keyId}`).then((r) => r.data),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['api-keys'] }),
   });
 }
 
 function useSaveOrg() {
   return useMutation({
-    mutationFn: async (data: { name: string; domain: string; timezone: string }) => {
-      const res = await axios.patch('/api/v1/auth/organization', data, { headers: authHeaders() });
-      return res.data;
-    },
+    mutationFn: (data: { name: string; domain: string; timezone: string }) =>
+      api.patch('/auth/organization', data).then((r) => r.data),
   });
 }
 
