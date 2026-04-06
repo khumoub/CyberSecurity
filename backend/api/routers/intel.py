@@ -469,3 +469,96 @@ async def get_patch_priority_ai(
     # Enrich with Claude AI recommendations
     enriched = await get_ai_patch_priority(priority)
     return {"items": enriched, "total": len(enriched), "ai_powered": bool(settings.CLAUDE_API_KEY)}
+
+
+@router.get("/attack-paths")
+async def get_attack_paths(
+    org_id: Optional[uuid.UUID] = Query(None),
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Compute attack paths between assets based on shared findings and lateral movement potential.
+    Returns a graph of nodes (assets) and edges (potential attack vectors).
+    """
+    effective_org_id = org_id or current_user.org_id
+
+    # Get assets with their critical/high finding counts
+    result = await db.execute(
+        select(
+            Asset.id,
+            Asset.value,
+            Asset.name,
+            Asset.asset_type,
+            func.count(Finding.id).label("total_findings"),
+            func.sum(case((Finding.severity == "critical", 1), else_=0)).label("critical"),
+            func.sum(case((Finding.severity == "high", 1), else_=0)).label("high"),
+            func.sum(case((Finding.is_known_exploited == True, 1), else_=0)).label("kev"),
+        )
+        .join(Finding, Finding.asset_id == Asset.id, isouter=True)
+        .where(Asset.org_id == effective_org_id)
+        .where(Finding.status.notin_(["resolved", "false_positive"]))
+        .group_by(Asset.id, Asset.value, Asset.name, Asset.asset_type)
+        .order_by(func.count(Finding.id).desc())
+        .limit(20)
+    )
+    rows = result.all()
+
+    nodes = []
+    for row in rows:
+        critical = row.critical or 0
+        high     = row.high or 0
+        kev      = row.kev or 0
+        risk     = "critical" if critical > 0 or kev > 0 else "high" if high > 0 else "medium"
+        nodes.append({
+            "id":           str(row.id),
+            "label":        row.value or row.name or str(row.id),
+            "asset_type":   row.asset_type or "unknown",
+            "risk":         risk,
+            "critical":     critical,
+            "high":         high,
+            "kev":          kev,
+            "total":        row.total_findings or 0,
+        })
+
+    # Build edges: connect nodes that share CVE IDs (lateral movement potential)
+    edges = []
+    if len(nodes) >= 2:
+        shared_cve_result = await db.execute(
+            select(Finding.asset_id, Finding.cve_id)
+            .where(Finding.org_id == effective_org_id)
+            .where(Finding.cve_id.isnot(None))
+            .where(Finding.status.notin_(["resolved", "false_positive"]))
+        )
+        shared_rows = shared_cve_result.all()
+
+        cve_to_assets: dict[str, set] = {}
+        for asset_id, cve_id in shared_rows:
+            if cve_id:
+                cve_to_assets.setdefault(cve_id, set()).add(str(asset_id))
+
+        edge_set: set[tuple] = set()
+        for cve_id, asset_ids in cve_to_assets.items():
+            asset_list = list(asset_ids)
+            for i in range(len(asset_list)):
+                for j in range(i + 1, len(asset_list)):
+                    pair = (min(asset_list[i], asset_list[j]), max(asset_list[i], asset_list[j]))
+                    if pair not in edge_set:
+                        edge_set.add(pair)
+                        edges.append({
+                            "source":  asset_list[i],
+                            "target":  asset_list[j],
+                            "label":   cve_id,
+                            "type":    "shared_cve",
+                            "weight":  1,
+                        })
+
+    return {
+        "nodes": nodes,
+        "edges": edges[:50],
+        "summary": {
+            "total_nodes": len(nodes),
+            "total_edges": len(edges),
+            "critical_nodes": sum(1 for n in nodes if n["risk"] == "critical"),
+        },
+    }

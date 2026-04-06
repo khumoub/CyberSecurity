@@ -46,11 +46,27 @@ celery_app.conf.update(
     beat_schedule={
         "check-sla-breaches": {
             "task": "worker.tasks.sla_task.check_sla_breaches",
-            "schedule": 3600.0,  # hourly
+            "schedule": 3600.0,      # hourly
+        },
+        "assign-sla-deadlines": {
+            "task": "worker.tasks.sla_task.assign_sla_deadlines",
+            "schedule": 86400.0,     # daily
+        },
+        "calculate-mttr": {
+            "task": "worker.tasks.sla_task.calculate_mttr",
+            "schedule": 604800.0,    # weekly
         },
         "fetch-cisa-kev": {
             "task": "worker.tasks.intel_task.fetch_cisa_kev",
-            "schedule": 86400.0,  # daily
+            "schedule": 86400.0,     # daily
+        },
+        "enrich-epss-scores": {
+            "task": "worker.tasks.intel_task.enrich_epss_scores",
+            "schedule": 86400.0,     # daily
+        },
+        "calculate-risk-scores": {
+            "task": "worker.tasks.intel_task.calculate_risk_scores",
+            "schedule": 86400.0,     # daily
         },
     },
 )

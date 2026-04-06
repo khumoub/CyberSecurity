@@ -247,8 +247,18 @@ export function useComplianceMapping(framework: string) {
 // ── Tools ─────────────────────────────────────────────────────────────────────
 export function useRunTool() {
   return useMutation({
-    mutationFn: ({ tool, data }: { tool: string; data: Record<string, unknown> }) =>
-      api.post(`/tools/${tool}`, data).then((r) => r.data),
+    mutationFn: ({ tool, body }: { tool: string; body: Record<string, unknown> }) =>
+      api.post(`/tools/${tool}`, body).then((r) => r.data),
+  });
+}
+
+// ── Intel ─────────────────────────────────────────────────────────────────────
+export function useAttackPaths() {
+  const orgId = useOrgId();
+  return useQuery({
+    queryKey: ['intel', 'attack-paths', orgId],
+    queryFn: () => api.get(`/intel/attack-paths?org_id=${orgId}`).then((r) => r.data),
+    enabled: !!orgId,
   });
 }
 

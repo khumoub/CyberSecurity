@@ -1,8 +1,9 @@
-import uuid
-from fastapi import APIRouter, Depends, HTTPException, status
+import uuid, os, shutil
+from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File
 from pydantic import BaseModel, Field
 from typing import Optional, List, Dict, Any
 from core.security import get_current_user
+from core.config import settings
 from models.user import User
 
 router = APIRouter()
@@ -372,17 +373,17 @@ async def run_wfuzz(
 
     scan_id = str(uuid.uuid4())
     celery_app.send_task(
-        "worker.tasks.gobuster_task.run_gobuster",  # reuse gobuster task structure
+        "worker.tasks.wfuzz_task.run_wfuzz",
         args=[
             scan_id,
             str(current_user.org_id),
             str(request.asset_id) if request.asset_id else None,
             request.target,
             {
+                "url": request.target,
                 "wordlist": request.wordlist,
-                "mode": "wfuzz",
-                "fuzz_position": request.fuzz_position,
-                "filter_codes": request.filter_codes,
+                "filter_code": request.filter_codes or "404",
+                "threads": 10,
             },
         ],
         queue="scans",
@@ -779,32 +780,28 @@ async def run_recon_ng(
     return {"scan_id": scan_id, "status": "queued", "message": "Recon-ng scan queued"}
 
 
-@router.post("/pcap-upload", response_model=dict)
+@router.post("/pcap-upload", response_model=dict, status_code=202)
 async def upload_pcap(
+    file: UploadFile = File(...),
     current_user: User = Depends(get_current_user),
 ):
-    """PCAP file upload endpoint — accepts multipart form file upload."""
-    import os
+    """PCAP file upload — saves file to disk then dispatches tshark analysis task."""
     scan_id = str(uuid.uuid4())
-    return {
-        "scan_id": scan_id,
-        "status": "queued",
-        "message": "PCAP uploaded and queued for analysis. Use /ws/scan/{scan_id} for live output.",
-        "upload_url": f"/api/v1/tools/pcap-upload/{scan_id}",
-    }
-
-
-@router.post("/pcap-upload/{scan_id}", response_model=dict)
-async def upload_pcap_file(
-    scan_id: str,
-    current_user: User = Depends(get_current_user),
-):
-    """Receive PCAP file bytes and dispatch analysis task."""
+    pcap_dir = os.path.join(getattr(settings, "SCAN_OUTPUT_DIR", "/tmp/scans"), "pcap")
+    os.makedirs(pcap_dir, exist_ok=True)
+    dest = os.path.join(pcap_dir, f"{scan_id}.pcap")
+    with open(dest, "wb") as f:
+        shutil.copyfileobj(file.file, f)
     _dispatch_task(
         "worker.tasks.pcap_task.run_pcap_analysis",
         str(current_user.org_id),
         None,
         scan_id,
-        {"protocol_filter": "all"},
+        {"pcap_path": dest, "protocol_filter": "all"},
     )
-    return {"scan_id": scan_id, "status": "queued", "message": "PCAP analysis queued"}
+    return {
+        "scan_id": scan_id,
+        "status": "queued",
+        "filename": file.filename,
+        "message": "PCAP uploaded and queued for analysis. Connect to /ws/scan/{scan_id} for live output.",
+    }
