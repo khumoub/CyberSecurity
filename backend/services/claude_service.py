@@ -3,7 +3,35 @@ Claude AI integration for:
 1. AI-powered vulnerability questionnaires (TPRM Module 6)
 2. AI-ranked patch priority with contextual remediation advice (Module 5)
 """
+import asyncio
+import logging
 from core.config import settings
+
+logger = logging.getLogger(__name__)
+
+_RETRYABLE_STATUS = {429, 529}
+_MAX_RETRIES = 3
+
+
+async def _call_claude(client, **kwargs):
+    """Call Claude API with exponential backoff on 429/529 (rate-limit / overloaded)."""
+    import anthropic
+    delay = 2.0
+    for attempt in range(_MAX_RETRIES):
+        try:
+            return await client.messages.create(**kwargs)
+        except anthropic.APIStatusError as e:
+            if e.status_code in _RETRYABLE_STATUS and attempt < _MAX_RETRIES - 1:
+                logger.warning(
+                    "Anthropic API %s on attempt %d/%d — retrying in %.1fs",
+                    e.status_code, attempt + 1, _MAX_RETRIES, delay,
+                )
+                await asyncio.sleep(delay)
+                delay *= 2
+                continue
+            raise
+    # Should not reach here
+    raise RuntimeError("Claude API retries exhausted")
 
 
 async def generate_vendor_questionnaire(vendor_name: str, findings: list[dict]) -> list[dict]:
@@ -46,11 +74,17 @@ Format as JSON array:
 
 Return ONLY the JSON array, no other text."""
 
-    message = await client.messages.create(
-        model="claude-sonnet-4-6",
-        max_tokens=2000,
-        messages=[{"role": "user", "content": prompt}],
-    )
+    try:
+        message = await _call_claude(
+            client,
+            model="claude-sonnet-4-6",
+            max_tokens=2000,
+            messages=[{"role": "user", "content": prompt}],
+        )
+    except Exception as e:
+        logger.error("Claude API error generating questionnaire: %s", e)
+        return _fallback_questionnaire(vendor_name, findings)
+
     import json
     text = message.content[0].text.strip()
     # Extract JSON array
@@ -124,7 +158,8 @@ Return a JSON array with objects {{\"original_rank\": 1-N, \"priority_rank\": 1-
 Return ONLY the JSON array."""
 
     try:
-        message = await client.messages.create(
+        message = await _call_claude(
+            client,
             model="claude-sonnet-4-6",
             max_tokens=2000,
             messages=[{"role": "user", "content": prompt}],
@@ -140,7 +175,8 @@ Return ONLY the JSON array."""
                 f["ai_rank"] = item.get("priority_rank", i + 1)
                 f["ai_recommendation"] = item.get("recommendation", f.get("remediation", ""))
             findings.sort(key=lambda x: x.get("ai_rank", 999))
-    except Exception:
+    except Exception as e:
+        logger.warning("Claude API error ranking findings (%s) — using fallback ranking", e)
         for i, f in enumerate(findings):
             f["ai_recommendation"] = f.get("remediation") or f"Remediate this {f.get('severity','?')} finding promptly."
 
