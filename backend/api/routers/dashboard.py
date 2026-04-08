@@ -3,7 +3,7 @@ from datetime import datetime, timezone, timedelta
 from typing import Optional
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, func, and_, case, text
+from sqlalchemy import select, func, and_, case, text, literal_column
 from core.database import get_db
 from core.security import get_current_user
 from models.finding import Finding
@@ -173,7 +173,7 @@ async def get_dashboard_stats(
     thirty_days_ago = now - timedelta(days=30)
     scan_trend_result = await db.execute(
         select(
-            func.date_trunc("day", ScanJob.created_at).label("date"),
+            literal_column("date_trunc('day', scan_jobs.created_at)").label("date"),
             func.count(ScanJob.id).label("count"),
         )
         .where(
@@ -182,8 +182,8 @@ async def get_dashboard_stats(
                 ScanJob.created_at >= thirty_days_ago,
             )
         )
-        .group_by(func.date_trunc("day", ScanJob.created_at))
-        .order_by(func.date_trunc("day", ScanJob.created_at))
+        .group_by(literal_column("date_trunc('day', scan_jobs.created_at)"))
+        .order_by(literal_column("date_trunc('day', scan_jobs.created_at)"))
     )
     scan_trend = [
         {"date": row.date.date().isoformat(), "count": row.count}
@@ -193,7 +193,7 @@ async def get_dashboard_stats(
     # ---- Findings trend (last 30 days, by severity) ----
     findings_trend_result = await db.execute(
         select(
-            func.date_trunc("day", Finding.created_at).label("date"),
+            literal_column("date_trunc('day', findings.created_at)").label("date"),
             func.sum(case((Finding.severity == "critical", 1), else_=0)).label("critical"),
             func.sum(case((Finding.severity == "high", 1), else_=0)).label("high"),
             func.sum(case((Finding.severity == "medium", 1), else_=0)).label("medium"),
@@ -205,8 +205,8 @@ async def get_dashboard_stats(
                 Finding.created_at >= thirty_days_ago,
             )
         )
-        .group_by(func.date_trunc("day", Finding.created_at))
-        .order_by(func.date_trunc("day", Finding.created_at))
+        .group_by(literal_column("date_trunc('day', findings.created_at)"))
+        .order_by(literal_column("date_trunc('day', findings.created_at)"))
     )
     findings_trend = [
         {

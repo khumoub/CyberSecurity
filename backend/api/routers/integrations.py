@@ -172,7 +172,7 @@ async def create_jira_issue(body: JiraIssueCreate, current_user: User = Depends(
     cur.execute(
         """SELECT f.id, f.title, f.description, f.severity, f.cve_id,
                   f.affected_component, f.affected_port, f.remediation,
-                  a.hostname, a.ip_address
+                  a.name, a.value
            FROM findings f LEFT JOIN assets a ON a.id = f.asset_id
            WHERE f.id = %s AND f.org_id = %s""",
         (body.finding_id, str(current_user.org_id))
@@ -419,7 +419,7 @@ async def send_slack_alert(body: SlackAlertRequest, current_user: User = Depends
     conn = _get_conn()
     cur = conn.cursor()
     cur.execute(
-        """SELECT f.title, f.severity, f.cve_id, f.affected_component, a.hostname, a.ip_address
+        """SELECT f.title, f.severity, f.cve_id, f.affected_component, a.name, a.value
            FROM findings f LEFT JOIN assets a ON a.id = f.asset_id
            WHERE f.id = %s AND f.org_id = %s""",
         (body.finding_id, str(current_user.org_id))

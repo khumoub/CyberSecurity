@@ -115,6 +115,7 @@ async def get_webhook(
 
 
 @router.put("/{webhook_id}", response_model=WebhookResponse)
+@router.patch("/{webhook_id}", response_model=WebhookResponse)
 async def update_webhook(
     webhook_id: str,
     request: WebhookUpdateRequest,

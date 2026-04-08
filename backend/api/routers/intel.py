@@ -489,7 +489,7 @@ async def get_attack_paths(
             Asset.id,
             Asset.value,
             Asset.name,
-            Asset.asset_type,
+            Asset.type,
             func.count(Finding.id).label("total_findings"),
             func.sum(case((Finding.severity == "critical", 1), else_=0)).label("critical"),
             func.sum(case((Finding.severity == "high", 1), else_=0)).label("high"),
@@ -498,7 +498,7 @@ async def get_attack_paths(
         .join(Finding, Finding.asset_id == Asset.id, isouter=True)
         .where(Asset.org_id == effective_org_id)
         .where(Finding.status.notin_(["resolved", "false_positive"]))
-        .group_by(Asset.id, Asset.value, Asset.name, Asset.asset_type)
+        .group_by(Asset.id, Asset.value, Asset.name, Asset.type)
         .order_by(func.count(Finding.id).desc())
         .limit(20)
     )
@@ -513,7 +513,7 @@ async def get_attack_paths(
         nodes.append({
             "id":           str(row.id),
             "label":        row.value or row.name or str(row.id),
-            "asset_type":   row.asset_type or "unknown",
+            "asset_type":   row.type or "unknown",
             "risk":         risk,
             "critical":     critical,
             "high":         high,
@@ -587,15 +587,13 @@ async def get_vpr_scores(
             Finding.title,
             Finding.severity,
             Finding.cvss_score,
-            Finding.epss_score,
             Finding.is_known_exploited,
             Finding.exploit_available,
             Finding.cve_id,
             Finding.affected_component,
             Finding.status,
             Asset.name.label("asset_name"),
-            Asset.asset_type,
-            Asset.criticality_score,
+            Asset.type,
         )
         .outerjoin(Asset, Asset.id == Finding.asset_id)
         .where(Finding.org_id == current_user.org_id)
@@ -613,25 +611,18 @@ async def get_vpr_scores(
         # CVSS factor
         cvss = float(row.cvss_score or 0)
         cvss_f = (cvss / 10.0) if cvss > 0 else 0.5
-        # EPSS factor
-        epss = float(row.epss_score or 0)
-        epss_f = 1.0 + epss * 2.0  # EPSS 0.5 = 2x multiplier
         # KEV + exploit
         kev_f = 2.0 if row.is_known_exploited else 1.0
         exploit_f = 1.5 if row.exploit_available else 1.0
-        # Asset criticality
-        asset_crit = getattr(row, 'criticality_score', None)
-        if asset_crit:
-            asset_f = min(float(asset_crit) / 5.0 + 0.5, 2.0)
-        else:
-            asset_type = (row.asset_type or "").lower()
-            asset_f = ASSET_CRITICALITY.get(
-                "critical" if "prod" in asset_type or "db" in asset_type else
-                "high" if "server" in asset_type else "medium",
-                1.0
-            )
+        # Asset criticality (inferred from type)
+        asset_type = (row.type or "").lower()
+        asset_f = ASSET_CRITICALITY.get(
+            "critical" if "prod" in asset_type or "db" in asset_type else
+            "high" if "server" in asset_type else "medium",
+            1.0
+        )
 
-        raw = base * cvss_f * epss_f * kev_f * exploit_f * asset_f
+        raw = base * cvss_f * kev_f * exploit_f * asset_f
         vpr = round(min(raw / 8.0, 10.0), 2)
 
         scored.append({
@@ -639,18 +630,16 @@ async def get_vpr_scores(
             "title": row.title,
             "severity": row.severity,
             "cvss_score": cvss,
-            "epss_score": epss,
             "is_known_exploited": row.is_known_exploited,
             "exploit_available": row.exploit_available,
             "cve_id": row.cve_id,
             "affected_component": row.affected_component,
             "status": row.status,
             "asset_name": row.asset_name,
-            "asset_type": row.asset_type,
+            "asset_type": row.type,
             "vpr_score": vpr,
             "vpr_factors": {
                 "cvss_factor": round(cvss_f, 2),
-                "epss_factor": round(epss_f, 2),
                 "kev_factor": kev_f,
                 "exploit_factor": exploit_f,
                 "asset_criticality_factor": round(asset_f, 2),
@@ -684,11 +673,11 @@ async def get_attack_path_chains(
     finding_rows = findings_result.all()
 
     assets_result = await db.execute(
-        select(Asset.id, Asset.name, Asset.asset_type, Asset.ip_address)
+        select(Asset.id, Asset.name, Asset.type, Asset.value)
         .where(Asset.org_id == current_user.org_id)
         .where(Asset.is_active == True)
     )
-    asset_rows = {str(r.id): {"name": r.name, "type": r.asset_type, "ip": r.ip_address} for r in assets_result.all()}
+    asset_rows = {str(r.id): {"name": r.name, "type": r.type, "ip": r.value} for r in assets_result.all()}
 
     # Build adjacency via shared CVEs
     import collections

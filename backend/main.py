@@ -3,6 +3,13 @@ from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
 from core.config import settings
 from core.database import engine, Base
+# Import ALL models so SQLAlchemy registers them before create_all
+from models.organization import Organization  # noqa: F401
+from models.user import User  # noqa: F401
+from models.asset import Asset  # noqa: F401
+from models.scan_job import ScanJob  # noqa: F401
+from models.finding import Finding  # noqa: F401
+from models.vendor import Vendor  # noqa: F401
 from api.routers import auth, assets, scans, findings, tools, reports, webhooks, billing
 from api.routers import intel, scan_ws, dashboard, mitre, remediation, tprm, users
 from api.routers import scan_policies, integrations

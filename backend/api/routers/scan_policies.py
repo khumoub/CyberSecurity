@@ -318,12 +318,12 @@ async def run_policy_now(policy_id: str, current_user: User = Depends(get_curren
 
     # Resolve asset targets
     if scan_all:
-        cur.execute("SELECT id, ip_address, hostname FROM assets WHERE org_id = %s AND is_active = TRUE", (str(current_user.org_id),))
+        cur.execute("SELECT id, value, name FROM assets WHERE org_id = %s AND is_active = TRUE", (str(current_user.org_id),))
         assets = cur.fetchall()
     elif asset_ids_json:
         asset_ids = json.loads(asset_ids_json) if isinstance(asset_ids_json, str) else asset_ids_json
         placeholders = ",".join(["%s"] * len(asset_ids))
-        cur.execute(f"SELECT id, ip_address, hostname FROM assets WHERE id IN ({placeholders})", asset_ids)
+        cur.execute(f"SELECT id, value, name FROM assets WHERE id IN ({placeholders})", asset_ids)
         assets = cur.fetchall()
     else:
         assets = []

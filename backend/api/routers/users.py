@@ -34,7 +34,7 @@ class UpdateActiveRequest(BaseModel):
 
 class CreateApiKeyRequest(BaseModel):
     name: str
-    scopes: List[str] = ["scan:read", "finding:read"]
+    permissions: List[str] = ["scan:read", "finding:read"]
 
 
 # ── Users ──────────────────────────────────────────────────────────────────────
@@ -213,7 +213,7 @@ async def list_api_keys(
     """List API keys for the organization."""
     result = await db.execute(
         text("""
-            SELECT id, name, key_prefix, scopes, created_at, last_used_at, is_active
+            SELECT id, name, key_prefix, permissions, created_at, last_used_at, is_active
               FROM api_keys
              WHERE org_id = :org_id
           ORDER BY created_at DESC
@@ -227,7 +227,7 @@ async def list_api_keys(
                 "id": str(r["id"]),
                 "name": r["name"],
                 "prefix": r["key_prefix"],
-                "scopes": r["scopes"] or [],
+                "permissions": r["permissions"] or [],
                 "created_at": r["created_at"].isoformat() if r["created_at"] else None,
                 "last_used_at": r["last_used_at"].isoformat() if r["last_used_at"] else None,
                 "is_active": r["is_active"],
@@ -246,7 +246,7 @@ async def create_api_key(
     """Create a new API key (shown once, then only prefix stored)."""
     raw_key   = f"lrsk_live_{secrets.token_urlsafe(32)}"
     key_hash  = hashlib.sha256(raw_key.encode()).hexdigest()
-    key_prefix = raw_key[:20] + "..."
+    key_prefix = raw_key[:16] + "..."
 
     # Ensure table exists (graceful degradation)
     await db.execute(text("""
@@ -257,7 +257,7 @@ async def create_api_key(
             name VARCHAR(255) NOT NULL,
             key_hash VARCHAR(64) UNIQUE NOT NULL,
             key_prefix VARCHAR(30) NOT NULL,
-            scopes TEXT[],
+            permissions TEXT[] DEFAULT '{}',
             is_active BOOLEAN DEFAULT TRUE,
             created_at TIMESTAMPTZ DEFAULT NOW(),
             last_used_at TIMESTAMPTZ
@@ -265,8 +265,8 @@ async def create_api_key(
     """))
     await db.execute(
         text("""
-            INSERT INTO api_keys (org_id, user_id, name, key_hash, key_prefix, scopes)
-            VALUES (:org_id, :user_id, :name, :key_hash, :key_prefix, :scopes)
+            INSERT INTO api_keys (org_id, user_id, name, key_hash, key_prefix, permissions)
+            VALUES (:org_id, :user_id, :name, :key_hash, :key_prefix, :permissions)
         """),
         {
             "org_id":     str(current_user.org_id),
@@ -274,7 +274,7 @@ async def create_api_key(
             "name":       req.name,
             "key_hash":   key_hash,
             "key_prefix": key_prefix,
-            "scopes":     req.scopes,
+            "permissions": req.permissions,
         },
     )
     await db.commit()
@@ -282,7 +282,7 @@ async def create_api_key(
         "key": raw_key,
         "prefix": key_prefix,
         "name": req.name,
-        "scopes": req.scopes,
+        "permissions": req.permissions,
         "message": "Save this key — it will not be shown again.",
     }
 
