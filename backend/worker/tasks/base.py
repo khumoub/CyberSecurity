@@ -142,7 +142,7 @@ def save_findings_to_db(
                 INSERT INTO findings (
                     id, org_id, scan_id, asset_id, title, description,
                     severity, cvss_score, cve_id, cwe_id, affected_component,
-                    affected_port, affected_service, remediation, references,
+                    affected_port, affected_service, remediation, "references",
                     raw_output, status, first_seen_at, last_seen_at, sla_due_date,
                     is_known_exploited, exploit_available, mitre_technique,
                     created_at, updated_at

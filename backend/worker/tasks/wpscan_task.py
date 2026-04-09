@@ -1,5 +1,5 @@
 import subprocess, os, json
-from worker.celery_app import celery
+from worker.celery_app import celery_app as celery
 from worker.tasks.base import publish_output, update_scan_status, save_findings_to_db
 from core.config import settings
 
