@@ -1,9 +1,13 @@
 import uuid
+import csv
+import io
 from datetime import datetime, timezone
-from typing import Optional
+from typing import Optional, List
 from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi.responses import StreamingResponse
+from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, func, and_, case
+from sqlalchemy import select, func, and_, case, text
 from core.database import get_db
 from core.security import get_current_user
 from models.finding import Finding
@@ -212,3 +216,157 @@ async def deduplicate_findings(
 
     await db.commit()
     return {"deduplicated": deduplicated, "message": f"Marked {deduplicated} duplicate findings"}
+
+
+# ── CSV Export ────────────────────────────────────────────────────────────────
+
+@router.get("/export/csv")
+async def export_findings_csv(
+    severity: Optional[str] = Query(None),
+    finding_status: Optional[str] = Query(None, alias="status"),
+    search: Optional[str] = Query(None),
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Export findings as a CSV file."""
+    filters = [Finding.org_id == current_user.org_id]
+    if severity:
+        filters.append(Finding.severity == severity)
+    if finding_status:
+        filters.append(Finding.status == finding_status)
+    if search:
+        filters.append(
+            Finding.title.ilike(f"%{search}%") | Finding.description.ilike(f"%{search}%")
+        )
+
+    result = await db.execute(
+        select(Finding).where(and_(*filters)).order_by(Finding.severity, Finding.created_at.desc())
+    )
+    findings = result.scalars().all()
+
+    output = io.StringIO()
+    writer = csv.DictWriter(output, fieldnames=[
+        "id", "title", "severity", "status", "cve_id", "cvss_score",
+        "affected_component", "affected_port", "affected_service",
+        "is_known_exploited", "exploit_available",
+        "first_seen_at", "last_seen_at", "sla_due_date", "resolved_at",
+        "description", "remediation",
+    ])
+    writer.writeheader()
+    for f in findings:
+        writer.writerow({
+            "id": str(f.id),
+            "title": f.title,
+            "severity": f.severity,
+            "status": f.status,
+            "cve_id": f.cve_id or "",
+            "cvss_score": f.cvss_score or "",
+            "affected_component": f.affected_component or "",
+            "affected_port": f.affected_port or "",
+            "affected_service": f.affected_service or "",
+            "is_known_exploited": f.is_known_exploited,
+            "exploit_available": f.exploit_available,
+            "first_seen_at": f.first_seen_at.isoformat() if f.first_seen_at else "",
+            "last_seen_at": f.last_seen_at.isoformat() if f.last_seen_at else "",
+            "sla_due_date": f.sla_due_date.isoformat() if f.sla_due_date else "",
+            "resolved_at": f.resolved_at.isoformat() if f.resolved_at else "",
+            "description": (f.description or "").replace("\n", " "),
+            "remediation": (f.remediation or "").replace("\n", " "),
+        })
+
+    output.seek(0)
+    filename = f"findings-export-{datetime.now(timezone.utc).strftime('%Y%m%d-%H%M%S')}.csv"
+    return StreamingResponse(
+        iter([output.getvalue()]),
+        media_type="text/csv",
+        headers={"Content-Disposition": f"attachment; filename={filename}"},
+    )
+
+
+# ── Bulk Update ───────────────────────────────────────────────────────────────
+
+class BulkUpdateRequest(BaseModel):
+    finding_ids: List[uuid.UUID]
+    status: Optional[str] = None
+    assigned_to: Optional[uuid.UUID] = None
+
+
+@router.post("/bulk-update", response_model=dict)
+async def bulk_update_findings(
+    request: BulkUpdateRequest,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Bulk update status or assignment for multiple findings."""
+    if not request.finding_ids:
+        raise HTTPException(status_code=400, detail="No finding IDs provided")
+
+    valid_statuses = {"open", "in_remediation", "resolved", "accepted_risk", "false_positive"}
+    if request.status and request.status not in valid_statuses:
+        raise HTTPException(status_code=400, detail=f"Invalid status. Must be one of: {valid_statuses}")
+
+    result = await db.execute(
+        select(Finding).where(
+            Finding.id.in_(request.finding_ids),
+            Finding.org_id == current_user.org_id,
+        )
+    )
+    findings = result.scalars().all()
+    if not findings:
+        raise HTTPException(status_code=404, detail="No matching findings found")
+
+    updated = 0
+    now = datetime.now(timezone.utc)
+    for finding in findings:
+        if request.status:
+            finding.status = request.status
+            if request.status == "resolved" and not finding.resolved_at:
+                finding.resolved_at = now
+        if request.assigned_to is not None:
+            finding.assigned_to = request.assigned_to
+        finding.updated_at = now
+        updated += 1
+
+    await db.commit()
+    return {"updated": updated, "message": f"Updated {updated} findings"}
+
+
+# ── SLA Summary ───────────────────────────────────────────────────────────────
+
+@router.get("/sla-summary", response_model=dict)
+async def get_sla_summary(
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Return counts of findings by SLA status: overdue, due_this_week, on_track."""
+    now = datetime.now(timezone.utc)
+    result = await db.execute(
+        select(Finding).where(
+            Finding.org_id == current_user.org_id,
+            Finding.status.in_(["open", "in_remediation"]),
+            Finding.sla_due_date.isnot(None),
+        )
+    )
+    findings = result.scalars().all()
+
+    overdue = 0
+    due_this_week = 0
+    on_track = 0
+    from datetime import timedelta
+    week_out = now + timedelta(days=7)
+
+    for f in findings:
+        due = f.sla_due_date.replace(tzinfo=timezone.utc) if f.sla_due_date.tzinfo is None else f.sla_due_date
+        if due < now:
+            overdue += 1
+        elif due <= week_out:
+            due_this_week += 1
+        else:
+            on_track += 1
+
+    return {
+        "overdue": overdue,
+        "due_this_week": due_this_week,
+        "on_track": on_track,
+        "total_with_sla": len(findings),
+    }

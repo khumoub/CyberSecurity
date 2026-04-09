@@ -323,6 +323,72 @@ export function useScanPolicies() {
   });
 }
 
+// ── Findings — new endpoints ──────────────────────────────────────────────────
+export function useFindingSlaSummary() {
+  const orgId = useOrgId();
+  return useQuery({
+    queryKey: ['findings', 'sla-summary', orgId],
+    queryFn: () => api.get('/findings/sla-summary').then((r) => r.data),
+    enabled: !!orgId,
+    refetchInterval: 60_000,
+  });
+}
+
+export function useBulkUpdateFindings() {
+  const qc = useQueryClient();
+  const orgId = useOrgId();
+  return useMutation({
+    mutationFn: (data: { finding_ids: string[]; status?: string; assigned_to?: string }) =>
+      api.post('/findings/bulk-update', data).then((r) => r.data),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['findings', orgId] });
+      qc.invalidateQueries({ queryKey: ['dashboard', 'stats', orgId] });
+    },
+  });
+}
+
+export function useExportFindingsCsv() {
+  return useMutation({
+    mutationFn: async (params?: { severity?: string; status?: string; search?: string }) => {
+      const qs = new URLSearchParams(params as Record<string, string> ?? {}).toString();
+      const resp = await api.get(`/findings/export/csv?${qs}`, { responseType: 'blob' });
+      const url = URL.createObjectURL(new Blob([resp.data], { type: 'text/csv' }));
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `findings-${new Date().toISOString().slice(0, 10)}.csv`;
+      a.click();
+      URL.revokeObjectURL(url);
+    },
+  });
+}
+
+// ── Dashboard — severity trend ─────────────────────────────────────────────
+export function useSeverityTrend(days = 30) {
+  const orgId = useOrgId();
+  return useQuery({
+    queryKey: ['dashboard', 'severity-trend', orgId, days],
+    queryFn: () => api.get(`/dashboard/severity-trend?days=${days}`).then((r) => r.data),
+    enabled: !!orgId,
+  });
+}
+
+// ── Intel — CVE lookup ────────────────────────────────────────────────────────
+export function useCveLookup(cveId: string) {
+  return useQuery({
+    queryKey: ['intel', 'cve', cveId],
+    queryFn: () => api.get(`/intel/nvd/cve/${cveId}`).then((r) => r.data),
+    enabled: !!cveId && cveId.startsWith('CVE-'),
+  });
+}
+
+export function useExploitSearch(query: string) {
+  return useQuery({
+    queryKey: ['intel', 'exploits', query],
+    queryFn: () => api.get(`/intel/exploit-db/search?query=${encodeURIComponent(query)}`).then((r) => r.data),
+    enabled: !!query && query.length > 2,
+  });
+}
+
 export function useCreateScanPolicy() {
   const qc = useQueryClient();
   return useMutation({

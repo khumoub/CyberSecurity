@@ -364,3 +364,51 @@ async def get_mttr(
         "org_id": str(effective_org_id),
         "mttr_by_severity": mttr_data,
     }
+
+
+@router.get("/severity-trend")
+async def get_severity_trend(
+    days: int = Query(30, ge=7, le=90),
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Return daily finding counts by severity for the last N days (for sparklines)."""
+    from datetime import timedelta
+    from models.finding import Finding
+
+    start = datetime.now(timezone.utc) - timedelta(days=days)
+
+    result = await db.execute(
+        select(
+            literal_column("date_trunc('day', findings.created_at)").label("day"),
+            Finding.severity,
+            func.count(Finding.id).label("cnt"),
+        )
+        .where(
+            Finding.org_id == current_user.org_id,
+            Finding.created_at >= start,
+        )
+        .group_by(
+            literal_column("date_trunc('day', findings.created_at)"),
+            Finding.severity,
+        )
+        .order_by(literal_column("date_trunc('day', findings.created_at)"))
+    )
+    rows = result.all()
+
+    # Build day buckets
+    from collections import defaultdict
+    daily: dict = defaultdict(lambda: {"critical": 0, "high": 0, "medium": 0, "low": 0, "info": 0})
+    for row in rows:
+        day_str = row.day.strftime("%Y-%m-%d")
+        daily[day_str][row.severity] = row.cnt
+
+    # Ensure every day in range is present
+    all_days = []
+    cur = start
+    while cur <= datetime.now(timezone.utc):
+        ds = cur.strftime("%Y-%m-%d")
+        all_days.append({"date": ds, **daily[ds]})
+        cur += timedelta(days=1)
+
+    return {"days": days, "trend": all_days}
